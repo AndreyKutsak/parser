@@ -1,0 +1,172 @@
+/**
+ * Статичний рушій — завантажує сторінки через axios і парсить HTML через cheerio.
+ *
+ * Підходить для:
+ *   - Класичних серверних сторінок (SSR)
+ *   - REST/HTML API
+ *   - Будь-яких ресурсів, що не потребують виконання JavaScript
+ *
+ * Підтримує GET і POST-запити з форматами тіла: json, form, raw.
+ */
+const axios = require('axios');
+const cheerio = require('cheerio');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const { HttpProxyAgent } = require('http-proxy-agent');
+const { SocksProxyAgent } = require('socks-proxy-agent');
+const { buildHeaders } = require('../../../utils/anti-bot');
+const logger = require('../../../utils/logger');
+
+/**
+ * Створює проксі-агент на основі конфігурації.
+ *
+ * @param {object|null} proxy            - Об'єкт конфігурації проксі
+ * @param {string}      proxy.protocol   - Протокол: http | https | socks4 | socks5
+ * @param {string}      proxy.host       - Хост проксі-сервера
+ * @param {number}      proxy.port       - Порт проксі-сервера
+ * @param {string}      [proxy.username] - Логін (необов'язково)
+ * @param {string}      [proxy.password] - Пароль (необов'язково)
+ * @returns {object|null} Агент для axios або null
+ */
+const buildProxyAgent = (proxy) => {
+  if (!proxy) return null;
+  const { protocol, host, port, username, password } = proxy;
+  const auth = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : '';
+  const proxyUrl = `${protocol}://${auth}${host}:${port}`;
+
+  if (protocol.startsWith('socks')) return new SocksProxyAgent(proxyUrl);
+  if (protocol === 'https') return new HttpsProxyAgent(proxyUrl);
+  return new HttpProxyAgent(proxyUrl);
+};
+
+/**
+ * Формує тіло запиту та відповідний заголовок Content-Type.
+ *
+ * Формати:
+ *   - json → серіалізує об'єкт через JSON.stringify, Content-Type: application/json
+ *   - form → кодує через URLSearchParams,      Content-Type: application/x-www-form-urlencoded
+ *   - raw  → передає рядок як є,              Content-Type: text/plain
+ *
+ * @param {object|null} body         - Об'єкт тіла з полями format і data
+ * @param {string}      body.format  - Формат: 'json' | 'form' | 'raw'
+ * @param {*}           body.data    - Дані для відправки
+ * @returns {{ payload: *, contentType: string|null }}
+ */
+const buildBody = (body) => {
+  if (!body?.data) return { payload: undefined, contentType: null };
+
+  switch (body.format) {
+    case 'form': {
+      const params = new URLSearchParams(
+        typeof body.data === 'object'
+          ? body.data
+          : Object.fromEntries(new URLSearchParams(body.data))
+      );
+      return { payload: params.toString(), contentType: 'application/x-www-form-urlencoded' };
+    }
+    case 'raw':
+      return { payload: String(body.data), contentType: 'text/plain' };
+    case 'json':
+    default:
+      return {
+        payload: typeof body.data === 'string' ? body.data : JSON.stringify(body.data),
+        contentType: 'application/json',
+      };
+  }
+};
+
+/**
+ * Завантажує сторінку за заданим URL і повертає cheerio-інстанс для парсингу.
+ *
+ * @param {string} url                - Цільовий URL
+ * @param {object} [options={}]       - Параметри запиту
+ * @param {object} [options.headers]  - Додаткові HTTP-заголовки
+ * @param {number} [options.timeout]  - Таймаут у мс (default: 30000)
+ * @param {object} [options.proxy]    - Конфігурація проксі
+ * @param {string} [options.cookies]  - Cookie-рядок у форматі "key=value; key2=value2"
+ * @param {boolean}[options.antiBot]  - Додавати реалістичні заголовки та User-Agent
+ * @param {string} [options.method]   - HTTP-метод: 'GET' | 'POST' (default: 'GET')
+ * @param {object} [options.body]     - Тіло POST-запиту { format, data }
+ * @returns {Promise<{ $: CheerioAPI, html: string, status: number, duration: number }>}
+ */
+const fetchPage = async (url, options = {}) => {
+  const {
+    headers      = {},
+    timeout      = 30000,
+    proxy        = null,
+    cookies      = null,
+    antiBot      = true,
+    method       = 'GET',
+    body         = null,
+    jsonHtmlField = null, // якщо відповідь JSON — витягти HTML з цього поля
+    jsonPath      = null, // шлях до масиву у JSON-відповіді: "data.models"
+  } = options;
+
+  const { payload, contentType } = buildBody(body);
+
+  const extraHeaders = {
+    ...(cookies     ? { Cookie: cookies }               : {}),
+    ...(contentType ? { 'Content-Type': contentType }   : {}),
+  };
+
+  const mergedHeaders = antiBot
+    ? buildHeaders({ ...headers, ...extraHeaders })
+    : { ...headers, ...extraHeaders };
+
+  const agent = buildProxyAgent(proxy);
+  const axiosConfig = {
+    method: method.toLowerCase(),
+    timeout,
+    headers: mergedHeaders,
+    responseType: 'text',
+    maxRedirects: 5,
+    maxContentLength: 10 * 1024 * 1024, // 10MB — відмовляємось від гігантських сторінок
+    maxBodyLength: 10 * 1024 * 1024,
+    validateStatus: (s) => s < 500, // не кидати помилку на 4xx
+    ...(payload !== undefined ? { data: payload } : {}),
+  };
+
+  if (agent) {
+    axiosConfig.httpAgent  = agent;
+    axiosConfig.httpsAgent = agent;
+    // Force socket destruction on timeout (proxy agents ignore axios timeout)
+    axiosConfig.transport = undefined;
+  }
+
+  const start = Date.now();
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Request timeout after ${timeout}ms`)), timeout + 2000)
+  );
+  const response = await Promise.race([axios(url, axiosConfig), timeoutPromise]);
+  const duration = Date.now() - start;
+
+  logger.debug('Статичний запит', { url, method, status: response.status, duration });
+
+  let htmlContent = response.data;
+
+  if (jsonPath) {
+    try {
+      const json = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+      const arr = jsonPath.split('.').reduce((obj, key) => obj?.[key], json);
+      const items = Array.isArray(arr) ? arr : (arr && typeof arr === 'object' ? [arr] : []);
+      const sc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const toClass = (name) => String(name).replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^(\d)/, '_$1');
+      htmlContent = '<div id="json-root">' + items.map((item) => {
+        const spans = Object.entries(item).map(([k, v]) => {
+          const val = typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
+          return `<span class="${toClass(k)}">${sc(val)}</span>`;
+        }).join('');
+        return `<div class="json-item">${spans}</div>`;
+      }).join('') + '</div>';
+    } catch { /* не JSON — парсимо як HTML */ }
+  } else if (jsonHtmlField) {
+    try {
+      const json = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+      if (json[jsonHtmlField]) htmlContent = json[jsonHtmlField];
+    } catch { /* не JSON — парсимо як HTML */ }
+  }
+
+  const $ = cheerio.load(htmlContent, { decodeEntities: true });
+  return { $, status: response.status, duration };
+};
+
+module.exports = { fetchPage };

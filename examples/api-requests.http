@@ -1,0 +1,204 @@
+### Web Parser Pro — Example API Requests
+### Use with VS Code REST Client extension
+
+@base = http://localhost:3000/api
+@token = YOUR_JWT_TOKEN_HERE
+
+# ══════════════════════════════════════════════════════════════════
+# AUTH
+# ══════════════════════════════════════════════════════════════════
+
+### Register a new user
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "email": "admin@example.com",
+  "password": "admin123"
+}
+
+### Login
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin123"
+}
+
+### Get current user
+GET {{base}}/auth/me
+Authorization: Bearer {{token}}
+
+# ══════════════════════════════════════════════════════════════════
+# TASKS
+# ══════════════════════════════════════════════════════════════════
+
+### List all tasks
+GET {{base}}/tasks
+Authorization: Bearer {{token}}
+
+### Create a task (books.toscrape.com demo)
+POST {{base}}/tasks
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Books To Scrape",
+  "url": "https://books.toscrape.com/",
+  "engine": "static",
+  "selectors": {
+    "item": "article.product_pod",
+    "fields": {
+      "title":        { "selector": "h3 a", "attr": "title", "transform": "trim" },
+      "price":        { "selector": "p.price_color", "transform": ["trim", "number"] },
+      "availability": { "selector": "p.availability", "transform": ["trim", "lowercase"] },
+      "link":         { "selector": "h3 a", "attr": "href" }
+    }
+  },
+  "pagination": {
+    "enabled": true,
+    "type": "next-button",
+    "selector": "li.next a",
+    "maxPages": 3
+  },
+  "options": {
+    "timeout": 30000,
+    "retries": 3,
+    "delay": 500,
+    "antiBot": true
+  }
+}
+
+### Get task by ID
+GET {{base}}/tasks/TASK_ID_HERE
+Authorization: Bearer {{token}}
+
+### Run task immediately
+POST {{base}}/tasks/TASK_ID_HERE/run
+Authorization: Bearer {{token}}
+
+### Pause task
+POST {{base}}/tasks/TASK_ID_HERE/pause
+Authorization: Bearer {{token}}
+
+### Resume task
+POST {{base}}/tasks/TASK_ID_HERE/resume
+Authorization: Bearer {{token}}
+
+### Update task
+PUT {{base}}/tasks/TASK_ID_HERE
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Updated Task Name",
+  "options": { "delay": 2000 }
+}
+
+### Delete task
+DELETE {{base}}/tasks/TASK_ID_HERE
+Authorization: Bearer {{token}}
+
+### Queue / scheduler stats
+GET {{base}}/tasks/queue/stats
+Authorization: Bearer {{token}}
+
+# ══════════════════════════════════════════════════════════════════
+# RESULTS
+# ══════════════════════════════════════════════════════════════════
+
+### Get results for a task (paginated)
+GET {{base}}/tasks/TASK_ID_HERE/results?page=1&limit=50
+Authorization: Bearer {{token}}
+
+### Get all parse runs for a task
+GET {{base}}/tasks/TASK_ID_HERE/results/runs
+Authorization: Bearer {{token}}
+
+### Get results for specific run
+GET {{base}}/tasks/TASK_ID_HERE/results?runId=RUN_ID_HERE
+Authorization: Bearer {{token}}
+
+### Total result count
+GET {{base}}/tasks/TASK_ID_HERE/results/count
+Authorization: Bearer {{token}}
+
+### Delete all results for a task
+DELETE {{base}}/tasks/TASK_ID_HERE/results
+Authorization: Bearer {{token}}
+
+# ══════════════════════════════════════════════════════════════════
+# EXPORT (open in browser / download)
+# ══════════════════════════════════════════════════════════════════
+
+### Export as JSON
+GET {{base}}/tasks/TASK_ID_HERE/export/json
+Authorization: Bearer {{token}}
+
+### Export as CSV
+GET {{base}}/tasks/TASK_ID_HERE/export/csv
+Authorization: Bearer {{token}}
+
+### Export as Excel
+GET {{base}}/tasks/TASK_ID_HERE/export/excel
+Authorization: Bearer {{token}}
+
+### Export specific run as Excel
+GET {{base}}/tasks/TASK_ID_HERE/export/excel?runId=RUN_ID_HERE
+Authorization: Bearer {{token}}
+
+# ══════════════════════════════════════════════════════════════════
+# PROXIES
+# ══════════════════════════════════════════════════════════════════
+
+### List proxies
+GET {{base}}/proxies
+Authorization: Bearer {{token}}
+
+### Add a single proxy
+POST {{base}}/proxies
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "host": "1.2.3.4",
+  "port": 8080,
+  "protocol": "http",
+  "username": "user",
+  "password": "pass"
+}
+
+### Bulk import proxies
+POST {{base}}/proxies/import
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "text": "1.2.3.4:8080\n5.6.7.8:3128\nsocks5://user:pass@9.10.11.12:1080",
+  "protocol": "http"
+}
+
+### Check a single proxy
+POST {{base}}/proxies/PROXY_ID_HERE/check
+Authorization: Bearer {{token}}
+
+### Check all proxies (background)
+POST {{base}}/proxies/check-all
+Authorization: Bearer {{token}}
+
+### Proxy stats
+GET {{base}}/proxies/stats
+Authorization: Bearer {{token}}
+
+### Delete a proxy
+DELETE {{base}}/proxies/PROXY_ID_HERE
+Authorization: Bearer {{token}}
+
+# ══════════════════════════════════════════════════════════════════
+# HEALTH
+# ══════════════════════════════════════════════════════════════════
+
+### Health check
+GET http://localhost:3000/health

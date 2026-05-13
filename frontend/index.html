@@ -1,0 +1,2112 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web Parser Pro</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <!-- ══════════════════════════════════════════════════════════════════
+     ЕКРАН ВХОДУ
+═══════════════════════════════════════════════════════════════════ -->
+    <div id="login-screen">
+      <div class="login-card">
+        <div class="login-title">🕷 Web Parser Pro</div>
+        <p class="login-sub">Універсальна платформа веб-скрапінгу</p>
+        <div class="tabs" style="margin-bottom: 24px">
+          <div class="tab active" onclick="switchAuthTab('login')">Вхід</div>
+          <div class="tab" onclick="switchAuthTab('register')">Реєстрація</div>
+        </div>
+
+        <form id="login-form">
+          <div class="form-group">
+            <label class="form-label">Електронна пошта</label>
+            <input
+              id="login-email"
+              type="email"
+              class="form-control"
+              placeholder="you@example.com"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Пароль</label>
+            <input
+              id="login-password"
+              type="password"
+              class="form-control"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%">
+            Увійти
+          </button>
+        </form>
+
+        <form id="register-form" class="hidden">
+          <div class="form-group">
+            <label class="form-label">Ім'я користувача</label>
+            <input
+              id="reg-username"
+              type="text"
+              class="form-control"
+              placeholder="myusername"
+              required
+              minlength="3"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Електронна пошта</label>
+            <input
+              id="reg-email"
+              type="email"
+              class="form-control"
+              placeholder="you@example.com"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Пароль</label>
+            <input
+              id="reg-password"
+              type="password"
+              class="form-control"
+              placeholder="мін. 6 символів"
+              required
+              minlength="6"
+            />
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%">
+            Створити акаунт
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     БОКОВА ПАНЕЛЬ
+═══════════════════════════════════════════════════════════════════ -->
+    <nav id="sidebar">
+      <div class="sidebar-logo">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 8v4l3 3" />
+        </svg>
+        Web Parser Pro
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Головне</div>
+        <div class="nav-item active" data-page="dashboard">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+          </svg>
+          Дашборд
+        </div>
+        <div class="nav-item" data-page="tasks">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+          Задачі
+        </div>
+        <div class="nav-item" data-page="results">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M3 3h18v18H3z" />
+            <path d="M3 9h18M3 15h18M9 3v18" />
+          </svg>
+          Результати
+        </div>
+        <div class="nav-item" data-page="monitor">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <path d="M8 21h8M12 17v4" />
+            <circle cx="7" cy="10" r="1" fill="currentColor" />
+            <path d="M10 10h7" />
+            <circle cx="7" cy="13" r="1" fill="currentColor" />
+            <path d="M10 13h4" />
+          </svg>
+          Черга
+        </div>
+        <div class="nav-item" data-page="proxies">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.07 4.93A10 10 0 014.93 19.07M4.93 4.93a10 10 0 0114.14 14.14"
+            />
+          </svg>
+          Проксі
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="nav-item" onclick="showHelp()">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+            <path d="M12 17h.01" />
+          </svg>
+          Допомога
+        </div>
+        <div class="nav-item" id="btn-logout">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"
+            />
+          </svg>
+          Вийти
+        </div>
+        <div style="font-size: 11px; color: #475569; padding: 8px 20px 0">
+          <span id="user-name"></span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     ОСНОВНИЙ КОНТЕНТ
+═══════════════════════════════════════════════════════════════════ -->
+    <div id="main">
+      <div id="topbar">
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm mobile-nav-toggle"
+          id="mobile-nav-toggle"
+          aria-label="Відкрити меню"
+        >
+          ☰
+        </button>
+        <strong style="font-size: 15px" id="topbar-title">Дашборд</strong>
+        <div class="ml-auto flex-gap">
+          <a href="/api-docs" target="_blank" class="btn btn-ghost btn-sm"
+            >API Документація</a
+          >
+        </div>
+      </div>
+
+      <div id="content">
+        <!-- ─── Дашборд ──────────────────────────────────────────────── -->
+        <div id="page-dashboard" class="page">
+          <div class="section-title">Дашборд</div>
+          <p class="section-sub">Огляд вашої інфраструктури парсингу</p>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-val" id="stat-total-tasks">—</div>
+              <div class="stat-label">Всього задач</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="stat-running">—</div>
+              <div class="stat-label">Виконуються</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="stat-scheduled">—</div>
+              <div class="stat-label">Заплановано</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="stat-total-records">—</div>
+              <div class="stat-label">Всього записів</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="stat-proxies">—</div>
+              <div class="stat-label">Активних проксі</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="stat-queue">—</div>
+              <div class="stat-label">Черга завдань</div>
+            </div>
+          </div>
+
+          <div class="quick-start-card">
+            <div>
+              <div class="quick-start-title">
+                Швидкий старт для звичайного користувача
+              </div>
+              <p class="quick-start-text">
+                Створіть першу задачу без складних налаштувань: вставте URL,
+                виберіть елемент на сторінці та збережіть конфігурацію.
+              </p>
+            </div>
+            <div class="quick-start-actions">
+              <button id="btn-new-task-quick" class="btn btn-primary">
+                Створити просту задачу
+              </button>
+              <button class="btn btn-ghost" onclick="showHelp()">
+                Як користуватися
+              </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">Останні задачі</div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Назва</th>
+                    <th>Статус</th>
+                    <th>Записів</th>
+                    <th>Останній запуск</th>
+                    <th>Тривалість</th>
+                    <th>Дії</th>
+                  </tr>
+                </thead>
+                <tbody id="dashboard-tasks"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Задачі ───────────────────────────────────────────────── -->
+        <div id="page-tasks" class="page hidden">
+          <div class="flex-gap" style="margin-bottom: 20px">
+            <div>
+              <div class="section-title">Задачі</div>
+              <p class="section-sub">Керуйте конфігураціями парсингу</p>
+            </div>
+            <div class="ml-auto flex-gap">
+              <span
+                id="tasks-count"
+                style="color: var(--text-2); font-size: 13px"
+              ></span>
+              <button id="btn-new-task" class="btn btn-primary">
+                + Нова задача
+              </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Назва / URL</th>
+                    <th>Статус</th>
+                    <th>Рушій</th>
+                    <th>Записів</th>
+                    <th>Розклад</th>
+                    <th>Оновлено</th>
+                    <th>Дії</th>
+                  </tr>
+                </thead>
+                <tbody id="tasks-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="tasks-pagination" class="pagination"></div>
+        </div>
+
+        <!-- ─── Результати ──────────────────────────────────────────── -->
+        <div id="page-results" class="page hidden">
+          <!-- Заголовок + основні кнопки -->
+          <div class="flex-gap" style="margin-bottom: 14px; flex-wrap: wrap; gap: 10px">
+            <div>
+              <div class="section-title">Результати — <span id="results-task-name">—</span></div>
+              <span id="results-total" style="color: var(--text-2); font-size: 13px"></span>
+            </div>
+            <div class="ml-auto flex-gap" style="flex-wrap: wrap; gap: 8px; align-items: center">
+              <select id="runs-select" class="form-control" style="width: auto; font-size: 13px"></select>
+              <!-- Дропдаун Експорт -->
+              <div class="dropdown" id="export-dropdown">
+                <button class="btn btn-ghost btn-sm dropdown-toggle" id="btn-export-dropdown">⬇ Експорт</button>
+                <div class="dropdown-menu" id="export-menu">
+                  <button id="btn-export-json" class="dropdown-item">📄 JSON</button>
+                  <button id="btn-export-csv" class="dropdown-item">📊 CSV</button>
+                  <button id="btn-export-txt" class="dropdown-item">📝 TXT</button>
+                  <button id="btn-export-excel" class="dropdown-item">📈 Excel</button>
+                  <div class="dropdown-divider"></div>
+                  <button id="btn-domain-export" class="dropdown-item">🌐 По домену</button>
+                  <div class="dropdown-divider"></div>
+                  <button id="btn-open-export-fields" class="dropdown-item">⚙ Поля та налаштування</button>
+                </div>
+              </div>
+              <button id="btn-open-analytics" class="btn btn-ghost btn-sm" title="Аналітика змін">📊 Аналітика</button>
+              <button id="btn-forward-api" class="btn btn-ghost btn-sm" title="Відправити вибрані на зовнішній API">→ API</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteAllResults()">Видалити всі</button>
+            </div>
+          </div>
+
+          <!-- Фільтри -->
+          <div class="flex-gap" style="gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px">
+            <input id="results-filter-search" class="form-control" placeholder="Пошук URL або значення..." style="min-width: 200px; max-width: 300px; font-size: 13px" />
+            <select id="results-filter-status" class="form-control" style="width: 150px; font-size: 13px">
+              <option value="">Усі статуси</option>
+              <option value="ok">OK</option>
+              <option value="error">Помилка</option>
+            </select>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer">
+              <input type="checkbox" id="results-filter-changed" /> Тільки зі змінами
+            </label>
+            <button id="btn-select-changed" class="btn btn-ghost btn-sm" title="Виділити всі рядки зі змінами">☑ Виділити зміни</button>
+            <button id="btn-reset-results-filters" class="btn btn-ghost btn-sm">✕ Фільтри</button>
+          </div>
+
+          <div id="results-content-empty"></div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead id="results-thead"></thead>
+                <tbody id="results-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Analytics section -->
+          <div id="analytics-section" style="margin-top: 32px; display: none">
+            <div class="card">
+              <div class="card-header flex-gap" style="align-items: center">
+                <strong>Аналітика змін</strong>
+                <div class="ml-auto flex-gap" style="gap: 8px; align-items: center">
+                  <select id="analytics-days" class="form-control" style="width: auto; font-size: 13px">
+                    <option value="7">7 днів</option>
+                    <option value="14">14 днів</option>
+                    <option value="30">30 днів</option>
+                    <option value="60">60 днів</option>
+                    <option value="90">90 днів</option>
+                  </select>
+                  <button class="btn btn-ghost btn-sm" onclick="loadAnalytics()">↺ Оновити</button>
+                  <button class="btn btn-ghost btn-sm" onclick="document.getElementById('analytics-section').style.display='none'">✕</button>
+                </div>
+              </div>
+              <div id="analytics-stat-cards" style="display: flex; flex-wrap: wrap; gap: 12px; padding: 16px 0;"></div>
+              <div style="position: relative; height: 280px;">
+                <canvas id="analytics-chart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sub-tasks section -->
+          <div id="subtasks-section" style="margin-top: 32px; display: none">
+            <div class="flex-gap" style="margin-bottom: 12px">
+              <div>
+                <strong>Підзадачі</strong>
+                <span
+                  id="subtasks-count"
+                  style="
+                    color: var(--text-2);
+                    font-size: 13px;
+                    margin-left: 8px;
+                  "
+                ></span>
+              </div>
+            </div>
+            <div id="subtasks-list"></div>
+          </div>
+        </div>
+
+        <!-- ─── Черга / Монітор ──────────────────────────────────────── -->
+        <div id="page-monitor" class="page hidden">
+          <div class="flex-gap" style="margin-bottom: 20px">
+            <div>
+              <div class="section-title">Черга задач</div>
+              <p class="section-sub">Активні задачі, підзадачі та розклад</p>
+            </div>
+            <button
+              class="btn btn-ghost btn-sm ml-auto"
+              onclick="loadMonitor()"
+            >
+              ↺ Оновити
+            </button>
+          </div>
+
+          <!-- Активні зараз -->
+          <div class="card" style="margin-bottom: 16px">
+            <div
+              class="card-header"
+              style="display: flex; align-items: center; gap: 8px"
+            >
+              <span
+                class="badge badge-warning"
+                style="
+                  width: 8px;
+                  height: 8px;
+                  border-radius: 50%;
+                  padding: 0;
+                  display: inline-block;
+                  animation: pulse 1.5s infinite;
+                "
+              ></span>
+              Виконуються зараз
+              <span
+                id="monitor-running-count"
+                class="badge badge-warning"
+                style="margin-left: auto"
+                >0</span
+              >
+            </div>
+            <div id="monitor-running">
+              <div class="empty-state" style="padding: 16px">
+                Немає активних задач
+              </div>
+            </div>
+          </div>
+
+          <!-- Призупинені -->
+          <div
+            class="card"
+            style="margin-bottom: 16px"
+            id="monitor-paused-card"
+          >
+            <div class="card-header">
+              Призупинені
+              <span
+                id="monitor-paused-count"
+                class="badge badge-idle"
+                style="margin-left: auto"
+                >0</span
+              >
+            </div>
+            <div id="monitor-paused">
+              <div class="empty-state" style="padding: 16px">
+                Немає призупинених задач
+              </div>
+            </div>
+          </div>
+
+          <!-- Заплановані -->
+          <div class="card" style="margin-bottom: 16px">
+            <div class="card-header">
+              Заплановані (cron)
+              <span
+                id="monitor-scheduled-count"
+                class="badge badge-idle"
+                style="margin-left: auto"
+                >0</span
+              >
+            </div>
+            <div id="monitor-scheduled">
+              <div class="empty-state" style="padding: 16px">
+                Немає запланованих задач
+              </div>
+            </div>
+          </div>
+
+          <!-- Активні підзадачі -->
+          <div class="card">
+            <div class="card-header">
+              Активні підзадачі
+              <span
+                id="monitor-subtasks-count"
+                class="badge badge-idle"
+                style="margin-left: auto"
+                >0</span
+              >
+            </div>
+            <div id="monitor-subtasks">
+              <div class="empty-state" style="padding: 16px">
+                Немає активних підзадач
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Проксі ───────────────────────────────────────────────── -->
+        <div id="page-proxies" class="page hidden">
+          <div class="flex-gap" style="margin-bottom: 20px">
+            <div>
+              <div class="section-title">Проксі</div>
+              <p class="section-sub">
+                Керуйте та моніторьте пул проксі-серверів
+              </p>
+            </div>
+            <div class="ml-auto flex-gap">
+              <span
+                id="proxies-count"
+                style="color: var(--text-2); font-size: 13px"
+              ></span>
+              <button id="btn-check-all-proxies" class="btn btn-ghost btn-sm">
+                Перевірити всі
+              </button>
+              <button id="btn-import-proxy-open" class="btn btn-primary">
+                + Імпорт проксі
+              </button>
+            </div>
+          </div>
+
+          <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr)">
+            <div class="stat-card">
+              <div class="stat-val" id="proxy-stat-total">—</div>
+              <div class="stat-label">Всього</div>
+            </div>
+            <div class="stat-card">
+              <div
+                class="stat-val"
+                id="proxy-stat-active"
+                style="color: var(--success)"
+              >
+                —
+              </div>
+              <div class="stat-label">Активних</div>
+            </div>
+            <div class="stat-card">
+              <div
+                class="stat-val"
+                id="proxy-stat-banned"
+                style="color: var(--danger)"
+              >
+                —
+              </div>
+              <div class="stat-label">Заблоковано</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="proxy-stat-avgtime">—</div>
+              <div class="stat-label">Середній відгук</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Проксі</th>
+                    <th>Країна</th>
+                    <th>Час відповіді</th>
+                    <th>Статус</th>
+                    <th>Викор.</th>
+                    <th>Помилок</th>
+                    <th>Остання перевірка</th>
+                    <th>Дії</th>
+                  </tr>
+                </thead>
+                <tbody id="proxies-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="proxies-pagination" class="pagination"></div>
+        </div>
+      </div>
+      <!-- /content -->
+    </div>
+    <!-- /main -->
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО ЗАДАЧІ
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="task-modal">
+      <div class="modal" style="max-width: 900px">
+        <div class="modal-header">
+          <span id="task-modal-title">Нова задача</span>
+          <button class="btn-close" id="btn-close-task-modal">×</button>
+        </div>
+        <div class="modal-body">
+          <!-- Вкладки -->
+          <div class="tabs">
+            <div class="tab active" data-tab="basic" data-tab-group="task">
+              Основне
+            </div>
+            <div class="tab" data-tab="requests" data-tab-group="task">
+              Запити
+            </div>
+            <div class="tab" data-tab="selectors" data-tab-group="task">
+              Селектори
+            </div>
+            <div class="tab" data-tab="pagination" data-tab-group="task">
+              Пагінація
+            </div>
+            <div class="tab" data-tab="schedule" data-tab-group="task">
+              Розклад
+            </div>
+            <div class="tab" data-tab="details" data-tab-group="task">
+              Деталі
+            </div>
+            <div class="tab" data-tab="advanced" data-tab-group="task">
+              Додатково
+            </div>
+          </div>
+
+          <!-- Основне -->
+          <div data-pane="basic" data-tab-group="task" class="tab-pane active">
+            <div class="setup-guide-card">
+              <div class="setup-guide-header">
+                <div>
+                  <div class="setup-guide-title">Майстер налаштування</div>
+                  <p class="setup-guide-text">
+                    Простий режим приховує технічні вкладки. Розширений режим
+                    відкриває весь функціонал для складних сценаріїв.
+                  </p>
+                </div>
+                <div class="setup-mode-switch" id="task-mode-switch">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    data-task-mode="simple"
+                  >
+                    Простий режим
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    data-task-mode="advanced"
+                  >
+                    Розширений
+                  </button>
+                </div>
+              </div>
+
+              <div class="setup-presets">
+                <button type="button" class="setup-preset" data-preset="catalog">
+                  <strong>Каталог товарів</strong>
+                  <span>Назва, ціна, посилання, картинка.</span>
+                </button>
+                <button type="button" class="setup-preset" data-preset="news">
+                  <strong>Новини або блог</strong>
+                  <span>Заголовок, дата, короткий опис.</span>
+                </button>
+                <button type="button" class="setup-preset" data-preset="directory">
+                  <strong>Каталог компаній</strong>
+                  <span>Назва, адреса, контакти, профіль.</span>
+                </button>
+              </div>
+
+              <div class="setup-checklist">
+                <div class="setup-checklist-item">
+                  1. Заповніть назву та URL сторінки.
+                </div>
+                <div class="setup-checklist-item">
+                  2. На вкладці "Селектори" натисніть "Вибрати".
+                </div>
+                <div class="setup-checklist-item">
+                  3. Додайте поля, які треба зберігати.
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Назва задачі *</label>
+                <input
+                  id="tf-name"
+                  class="form-control"
+                  placeholder="напр. Парсер цін товарів"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Рушій</label>
+                <select id="tf-engine" class="form-control">
+                  <option value="static">
+                    Статичний (axios + cheerio) — швидкий
+                  </option>
+                  <option value="dynamic">
+                    Динамічний (Puppeteer) — JS-рендеринг
+                  </option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label"
+                >Цільовий URL
+                <small style="color: var(--text-2)"
+                  >(якщо не використовуються множинні запити)</small
+                ></label
+              >
+              <input
+                id="tf-url"
+                class="form-control"
+                placeholder="https://example.com/products"
+                type="url"
+              />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">HTTP-метод</label>
+                <select id="tf-method" class="form-control">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label"
+                  >Формат тіла
+                  <small style="color: var(--text-2)"
+                    >(лише для POST)</small
+                  ></label
+                >
+                <select id="tf-body-format" class="form-control">
+                  <option value="json">JSON</option>
+                  <option value="form">
+                    Form (application/x-www-form-urlencoded)
+                  </option>
+                  <option value="raw">Raw (text/plain)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" id="tf-body-group">
+              <label class="form-label"
+                >Тіло запиту
+                <small style="color: var(--text-2)">(для POST)</small></label
+              >
+              <textarea
+                id="tf-body-data"
+                class="form-control"
+                rows="4"
+                placeholder='{"key": "value", "page": 1}'
+              ></textarea>
+              <p class="form-hint">
+                JSON-об'єкт, рядок form-encoded або довільний текст — залежно
+                від обраного формату
+              </p>
+            </div>
+          </div>
+
+          <!-- Запити -->
+          <div data-pane="requests" data-tab-group="task" class="tab-pane">
+            <div class="flex-gap" style="margin-bottom: 12px">
+              <div>
+                <strong>Список запитів</strong>
+                <p class="form-hint" style="margin: 0">
+                  Кожен запит має власний URL, метод і тіло. Використовується
+                  замість єдиного URL на вкладці «Основне».
+                </p>
+              </div>
+              <button class="btn btn-ghost btn-sm ml-auto" id="btn-add-request">
+                + Додати запит
+              </button>
+            </div>
+            <div id="requests-container"></div>
+            <p class="form-hint" style="margin-top: 8px">
+              Якщо список порожній — використовується URL і метод з вкладки
+              «Основне».<br />
+              Для кожного запиту можна вказати власні селектори, або залишити
+              порожніми — тоді використовуватимуться загальні з вкладки
+              «Селектори».
+            </p>
+          </div>
+
+          <!-- Селектори -->
+          <div data-pane="selectors" data-tab-group="task" class="tab-pane">
+            <div class="form-group">
+              <label class="form-label"
+                >Селектор контейнера елементів *
+                <small style="color: var(--text-2)"
+                  >(повторюваний елемент на запис)</small
+                ></label
+              >
+              <div class="flex-gap">
+                <input
+                  id="tf-item-sel"
+                  class="form-control"
+                  placeholder=".product-item, article.card, tr.row, …"
+                />
+                <button
+                  id="btn-open-selector"
+                  class="btn btn-ghost btn-sm"
+                  title="Візуальний вибір"
+                >
+                  🎯 Вибрати
+                </button>
+                <button
+                  id="btn-scan-fields"
+                  class="btn btn-ghost btn-sm"
+                  title="Автоматично сканувати поля товару"
+                >
+                  🤖 Сканувати поля
+                </button>
+              </div>
+              <p class="form-hint">
+                CSS-селектор, що відповідає кожному рядку/картці/елементу у
+                списку
+              </p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Ключове поле для трекінгу змін</label>
+              <input
+                id="tf-key-field"
+                class="form-control"
+                placeholder="назва поля-ідентифікатора, напр. артикул"
+              />
+              <p class="form-hint">
+                Назва поля (з таблиці нижче), яке унікально ідентифікує товар.
+                При повторному парсингу — порівнює значення всіх monitored полів
+                з попереднім запуском і зберігає зміни.
+              </p>
+            </div>
+
+            <div style="margin-bottom: 12px">
+              <div class="flex-gap" style="margin-bottom: 8px">
+                <strong>Поля для витягування</strong>
+                <button class="btn btn-ghost btn-sm" id="btn-add-field">
+                  + Додати поле
+                </button>
+              </div>
+              <div
+                style="
+                  display: grid;
+                  grid-template-columns: 120px 120px 1fr 80px 140px 80px 80px;
+                  gap: 8px;
+                  font-size: 11px;
+                  font-weight: 600;
+                  color: var(--text-2);
+                  padding: 0 2px;
+                  margin-bottom: 4px;
+                "
+              >
+                <span>Назва поля</span><span>CSS селектор</span
+                ><span>Атрибут</span><span>Трансформація</span
+                ><span>Монітор</span><span></span>
+              </div>
+              <div id="fields-container"></div>
+            </div>
+            <p class="form-hint">
+              Атрибут: залиште порожнім для тексту, або вкажіть
+              <code>src</code>, <code>href</code>,
+              <code>data-price</code> тощо.<br />
+              Трансформація: <code>trim</code>, <code>number</code>,
+              <code>lowercase</code>, <code>regex:(\d+):1</code>
+            </p>
+          </div>
+
+          <!-- Пагінація -->
+          <div data-pane="pagination" data-tab-group="task" class="tab-pane">
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                "
+              >
+                <input type="checkbox" id="tf-pagination-enabled" /> Увімкнути
+                пагінацію
+              </label>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Тип пагінації</label>
+                <select id="tf-pagination-type" class="form-control">
+                  <option value="next-button">Кнопка «Наступна» (клік)</option>
+                  <option value="url-pattern">Шаблон URL ({page})</option>
+                  <option value="scroll">Нескінченне прокручування</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Макс. сторінок</label>
+                <input
+                  id="tf-pagination-maxpages"
+                  type="number"
+                  class="form-control"
+                  value="10"
+                  min="1"
+                  max="1000"
+                />
+              </div>
+            </div>
+            <div class="form-row" id="tf-pagination-offset-row" style="display:none">
+              <div class="form-group">
+                <label class="form-label">Початкове значення {page}</label>
+                <input
+                  id="tf-pagination-startpage"
+                  type="number"
+                  class="form-control"
+                  value="1"
+                  min="0"
+                  title="Перше значення, яке підставляється замість {page}"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Крок {page}</label>
+                <input
+                  id="tf-pagination-pagestep"
+                  type="number"
+                  class="form-control"
+                  value="1"
+                  min="1"
+                  title="На скільки збільшувати {page} на кожній сторінці (наприклад 18 для ?start=0,18,36…)"
+                />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Селектор кнопки / шаблон URL</label>
+              <input
+                id="tf-pagination-selector"
+                class="form-control"
+                placeholder=".pagination .next  або  https://site.com/page/{page}"
+              />
+            </div>
+          </div>
+
+          <!-- Розклад -->
+          <div data-pane="schedule" data-tab-group="task" class="tab-pane">
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                "
+              >
+                <input type="checkbox" id="tf-schedule-enabled" /> Увімкнути
+                автоматичний розклад
+              </label>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Простий розклад</label>
+              <select id="tf-cron-simple" class="form-control">
+                <option value="manual">Ввести cron самостійно</option>
+                <option value="every_minute">Щохвилини</option>
+                <option value="every_hour">Щогодини</option>
+                <option value="daily_midnight">Щодня опівночі</option>
+                <option value="daily_9am">Щодня о 09:00</option>
+                <option value="weekdays_9am">Будні о 09:00</option>
+                <option value="every_n_minutes">Кожні N хвилин</option>
+              </select>
+              <input
+                id="tf-cron-simple-minutes"
+                type="number"
+                class="form-control"
+                min="1"
+                value="15"
+                style="display: none; margin-top: 8px; max-width: 160px"
+              />
+              <p class="form-hint">
+                Оберіть простий варіант, і поле cron заповниться автоматично.
+                Якщо хочете точний розклад, оберіть «Ввести cron самостійно».
+              </p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cron-вираз</label>
+              <input
+                id="tf-cron"
+                class="form-control"
+                placeholder="0 */6 * * *  (кожні 6 годин)"
+              />
+              <p class="form-hint">
+                Формат:
+                <code>хвилини години день-місяця місяць день-тижня</code>.
+                <br />
+                Приклади: <code>*/1 * * * *</code> — кожну хвилину,
+                <code>0 */6 * * *</code> — кожні 6 годин,
+                <code>0 9 * * 1-5</code> — будні о 9:00,
+                <code>0 0 * * *</code> — щодня опівночі.
+                <br />
+                <code>/1</code> означає «кожен 1-ий крок» в полі. Тобто
+                <code>*/1</code> = «кожний».
+              </p>
+            </div>
+          </div>
+
+          <!-- Деталі (перехід за посиланням) -->
+          <div data-pane="details" data-tab-group="task" class="tab-pane">
+            <div class="form-group">
+              <label class="form-label">CSS-селектор посилання на деталі</label>
+              <input
+                id="tf-link-selector"
+                class="form-control"
+                placeholder=".product-title a, a.item-link"
+              />
+              <p class="form-hint">
+                Парсер зайде на кожне таке посилання і зберігатиме поля разом із
+                записом списку.
+              </p>
+            </div>
+            <div style="margin-bottom: 12px">
+              <div class="flex-gap" style="margin-bottom: 8px">
+                <strong>Поля зі сторінки деталей</strong>
+                <button class="btn btn-ghost btn-sm" id="btn-add-detail-field">
+                  + Додати поле
+                </button>
+              </div>
+              <div
+                style="
+                  display: grid;
+                  grid-template-columns: 1fr 1fr 1fr 1fr auto auto;
+                  gap: 6px;
+                  font-size: 12px;
+                  color: var(--text-2);
+                  margin-bottom: 4px;
+                "
+              >
+                <span>Назва поля</span><span>CSS селектор</span
+                ><span>Атрибут</span><span>Трансформація</span><span></span
+                ><span></span>
+              </div>
+              <div id="detail-fields-container"></div>
+            </div>
+
+            <!-- Sub-task config -->
+            <hr
+              style="
+                border: none;
+                border-top: 1px solid var(--border);
+                margin: 16px 0;
+              "
+            />
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                "
+              >
+                <input type="checkbox" id="tf-subtasks-enabled" />
+                Автоматично створювати підзадачі для кожного знайденого
+                посилання
+              </label>
+              <p class="form-hint">
+                Підзадача буде повторно парсити сторінку деталей через заданий
+                інтервал і зберігати історію змін.
+              </p>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Інтервал (хвилин)</label>
+                <input
+                  id="tf-subtasks-interval"
+                  type="number"
+                  class="form-control"
+                  value="60"
+                  min="1"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label"
+                  >Cron (необов'язково)
+                  <small style="color: var(--text-2)"
+                    >перекриває інтервал</small
+                  ></label
+                >
+                <input
+                  id="tf-subtasks-cron"
+                  class="form-control"
+                  placeholder="0 */2 * * *"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Додатково -->
+          <div data-pane="advanced" data-tab-group="task" class="tab-pane">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Таймаут (мс)</label>
+                <input
+                  id="tf-timeout"
+                  type="number"
+                  class="form-control"
+                  value="30000"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Повторні спроби</label>
+                <input
+                  id="tf-retries"
+                  type="number"
+                  class="form-control"
+                  value="3"
+                  min="0"
+                  max="10"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Затримка між сторінками (мс)</label>
+                <input
+                  id="tf-delay"
+                  type="number"
+                  class="form-control"
+                  value="1000"
+                />
+              </div>
+            </div>
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                "
+              >
+                <input type="checkbox" id="tf-antibot" checked /> Захист від
+                ботів (випадковий User-Agent та реалістичні заголовки)
+              </label>
+            </div>
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                "
+              >
+                <input type="checkbox" id="tf-ajax-header" /> Надіслати
+                <code>X-Requested-With: XMLHttpRequest</code>
+              </label>
+              <p class="form-hint">
+                Увімкніть якщо сайт повертає JSON тільки на AJAX-запити
+              </p>
+            </div>
+            <div class="form-group">
+              <label class="form-label"
+                >JSON → HTML поле
+                <small style="color: var(--text-2)"
+                  >(якщо відповідь JSON)</small
+                ></label
+              >
+              <input
+                id="tf-json-html-field"
+                class="form-control"
+                placeholder="product_list_html"
+              />
+              <p class="form-hint">
+                Вкажіть назву поля в JSON-відповіді, яке містить HTML з товарами
+              </p>
+            </div>
+            <div class="form-group">
+              <label class="form-label"
+                >JSON-шлях до масиву
+                <small style="color: var(--text-2)">(JSON API)</small></label
+              >
+              <input
+                id="tf-json-path"
+                class="form-control"
+                placeholder="data.models"
+              />
+              <p class="form-hint">
+                Крапковий шлях до масиву об'єктів у JSON-відповіді. Після цього
+                селектор елемента = <code>.json-item</code>, поля — за назвою
+                класу: <code>.name</code>, <code>.brand_name</code>,
+                <code>.url</code> і т.д.
+              </p>
+            </div>
+            <!-- Рекурсивний обхід -->
+            <div
+              style="border-top: 1px solid var(--border); margin: 16px 0 12px"
+            ></div>
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                  font-weight: 600;
+                "
+              >
+                <input type="checkbox" id="tf-crawl-enabled" />
+                Рекурсивний обхід посилань (Spider)
+              </label>
+              <p class="form-hint">
+                Після парсингу кожної сторінки — знаходить всі посилання,
+                відкриває їх і парсить так само, рекурсивно.
+              </p>
+            </div>
+            <div
+              id="tf-crawl-options"
+              style="display: none; padding-left: 16px"
+            >
+              <div class="form-group">
+                <label class="form-label">
+                  URL-шаблон з полів
+                  <small style="color: var(--text-2)"
+                    >— підставляє поля кожного запису</small
+                  >
+                </label>
+                <input
+                  id="tf-crawl-url-template"
+                  class="form-control"
+                  placeholder="https://site.com/api/{{артикул}}/details"
+                />
+                <p class="form-hint">
+                  Для кожного спарсеного запису підставляє
+                  <code>{{назва_поля}}</code> і відкриває побудований URL.<br />
+                  Якщо вказано — CSS-селектор посилань ігнорується.
+                </p>
+              </div>
+              <div class="form-group">
+                <label class="form-label"
+                  >JSON-шлях у відповіді
+                  <small style="color: var(--text-2)"
+                    >якщо відповідь — JSON API</small
+                  >
+                </label>
+                <input
+                  id="tf-crawl-json-path"
+                  class="form-control"
+                  placeholder="data.items"
+                />
+                <p class="form-hint">
+                  Крапковий шлях до масиву в JSON-відповіді crawled-сторінки.
+                  Поля масиву доступні в шаблоні наступного рівня через
+                  <code>{{назва}}</code>.
+                </p>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label"
+                    >Селектор посилань
+                    <small style="color: var(--text-2)"
+                      >(якщо шаблон порожній)</small
+                    >
+                  </label>
+                  <input
+                    id="tf-crawl-selector"
+                    class="form-control"
+                    value="a[href]"
+                    placeholder="a[href], .product-link"
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label"
+                    >Макс. глибина
+                    <small style="color: var(--text-2)"
+                      >(0 = безкінечно)</small
+                    ></label
+                  >
+                  <input
+                    id="tf-crawl-max-depth"
+                    type="number"
+                    class="form-control"
+                    value="3"
+                    min="0"
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label"
+                    >Макс. crawl-запитів
+                    <small style="color: var(--text-2)"
+                      >(0 = без ліміту)</small
+                    ></label
+                  >
+                  <input
+                    id="tf-crawl-max-requests"
+                    type="number"
+                    class="form-control"
+                    value="0"
+                    min="0"
+                  />
+                  <p class="form-hint">
+                    Незалежно від «Макс. сторінок» на вкладці «Основне»
+                  </p>
+                </div>
+              </div>
+              <div class="form-group">
+                <label
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    cursor: pointer;
+                  "
+                >
+                  <input type="checkbox" id="tf-crawl-same-origin" checked />
+                  Тільки той самий домен (same-origin)
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                "
+              >
+                <input type="checkbox" id="tf-proxy-enabled" /> Використовувати
+                ротацію проксі
+              </label>
+            </div>
+
+            <!-- Webhook для сповіщень -->
+            <div
+              style="border-top: 1px solid var(--border); margin: 16px 0 12px"
+            ></div>
+            <div class="form-group">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  cursor: pointer;
+                  font-weight: 600;
+                "
+              >
+                <input type="checkbox" id="tf-notification-enabled" />
+                Відправляти сповіщення про новий контент
+              </label>
+              <p class="form-hint">
+                Коли парсер знайде новий або змінений контент, відправить дані
+                на зовнішній webhook URL.
+              </p>
+            </div>
+            <div
+              id="tf-notification-options"
+              style="display: none; padding-left: 16px"
+            >
+              <div class="form-group">
+                <label class="form-label">URL вебхука</label>
+                <input
+                  id="tf-notification-url"
+                  type="url"
+                  class="form-control"
+                  placeholder="https://api.example.com/webhook/parser"
+                />
+                <p class="form-hint">
+                  URL-адресу вебхука для отримання JSON-даних з новими
+                  результатами парсингу.
+                </p>
+              </div>
+              <div class="form-group">
+                <label class="form-label">HTTP метод</label>
+                <select id="tf-notification-method" class="form-control">
+                  <option value="POST">POST (рекомендовано)</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="GET">GET</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Додаткові заголовки (JSON)</label>
+                <textarea
+                  id="tf-notification-headers"
+                  class="form-control"
+                  rows="3"
+                  placeholder='{"Authorization": "Bearer TOKEN"}'
+                ></textarea>
+                <p class="form-hint">
+                  JSON-об'єкт з додатковими HTTP-заголовками для запиту вебхука.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeTaskModal()">
+            Скасувати
+          </button>
+          <button class="btn btn-primary" id="btn-save-task">
+            Зберегти задачу
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО ІМПОРТУ ПРОКСІ
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="proxy-modal">
+      <div class="modal" style="max-width: 560px">
+        <div class="modal-header">
+          Імпорт проксі
+          <button class="btn-close" id="btn-close-proxy-modal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Список проксі (один на рядок)</label>
+            <textarea
+              id="proxy-import-text"
+              class="form-control"
+              rows="10"
+              placeholder="host:port&#10;host:port:username:password&#10;socks5://user:pass@host:port&#10;http://1.2.3.4:8080"
+            ></textarea>
+            <p class="form-hint">
+              Підтримувані формати: <code>host:port</code>,
+              <code>host:port:user:pass</code>,
+              <code>protocol://user:pass@host:port</code>
+            </p>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Протокол за замовчуванням</label>
+              <select id="proxy-import-protocol" class="form-control">
+                <option value="http">HTTP</option>
+                <option value="https">HTTPS</option>
+                <option value="socks4">SOCKS4</option>
+                <option value="socks5">SOCKS5</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Логін за замовчуванням</label>
+              <input
+                id="proxy-import-username"
+                class="form-control"
+                placeholder="необов'язково"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Пароль за замовчуванням</label>
+              <input
+                id="proxy-import-password"
+                class="form-control"
+                type="password"
+                placeholder="необов'язково"
+              />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            class="btn btn-ghost"
+            onclick="
+              document.getElementById('proxy-modal').classList.remove('open')
+            "
+          >
+            Скасувати
+          </button>
+          <button class="btn btn-primary" id="btn-import-proxies">
+            Імпортувати
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО ЛОГУ ЗАПУСКІВ
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="run-log-modal">
+      <div class="modal" style="max-width: 760px">
+        <div class="modal-header">
+          Лог запитів
+          <button
+            class="btn-close"
+            onclick="
+              document.getElementById('run-log-modal').classList.remove('open')
+            "
+          >
+            ×
+          </button>
+        </div>
+        <div
+          class="modal-body"
+          id="run-log-body"
+          style="max-height: 70vh; overflow-y: auto"
+        ></div>
+      </div>
+    </div>
+
+    <!-- Live monitor modal -->
+    <div class="modal-overlay" id="live-monitor-modal">
+      <div
+        class="modal"
+        style="
+          max-width: 900px;
+          height: 80vh;
+          display: flex;
+          flex-direction: column;
+        "
+      >
+        <div class="modal-header" style="flex-shrink: 0">
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              flex: 1;
+              min-width: 0;
+            "
+          >
+            <span
+              id="live-monitor-indicator"
+              style="
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--warning);
+                flex-shrink: 0;
+              "
+            ></span>
+            <span
+              id="live-monitor-title"
+              style="
+                font-weight: 600;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              "
+            ></span>
+            <span
+              id="live-monitor-timer"
+              style="
+                font-size: 12px;
+                color: var(--text-2);
+                font-variant-numeric: tabular-nums;
+              "
+            ></span>
+          </div>
+          <button class="btn-close" id="btn-close-live-monitor">✕</button>
+        </div>
+        <div
+          id="live-monitor-body"
+          style="
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            font-size: 13px;
+            font-family: monospace;
+            background: var(--bg-2);
+          "
+        ></div>
+        <div
+          id="live-monitor-footer"
+          style="
+            flex-shrink: 0;
+            padding: 10px 16px;
+            border-top: 1px solid var(--border);
+            font-size: 13px;
+            color: var(--text-2);
+            display: flex;
+            gap: 24px;
+          "
+        ></div>
+      </div>
+    </div>
+
+    <!-- Sub-task history modal -->
+    <div class="modal-overlay" id="subtask-history-modal">
+      <div class="modal" style="max-width: 780px">
+        <div class="modal-header">
+          <span id="subtask-history-title">Історія підзадачі</span>
+          <button
+            class="btn-close"
+            onclick="
+              document
+                .getElementById('subtask-history-modal')
+                .classList.remove('open')
+            "
+          >
+            ✕
+          </button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto">
+          <div
+            id="subtask-history-stats"
+            style="
+              display: flex;
+              gap: 24px;
+              margin-bottom: 12px;
+              font-size: 13px;
+              color: var(--text-2);
+            "
+          ></div>
+          <div style="display: flex; gap: 8px; margin-bottom: 16px">
+            <button
+              class="btn btn-sm btn-primary"
+              onclick="exportSubTaskHistory('json')"
+            >
+              📄 JSON
+            </button>
+            <button
+              class="btn btn-sm btn-primary"
+              onclick="exportSubTaskHistory('csv')"
+            >
+              📊 CSV
+            </button>
+            <button
+              class="btn btn-sm btn-primary"
+              onclick="exportSubTaskHistory('excel')"
+            >
+              📈 Excel
+            </button>
+          </div>
+          <div id="subtask-history-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result change history modal -->
+    <div class="modal-overlay" id="result-change-history-modal">
+      <div class="modal" style="max-width: 600px">
+        <div class="modal-header">
+          <h3 class="modal-title" id="result-change-history-title">
+            Історія змін
+          </h3>
+          <button
+            class="btn-close"
+            onclick="
+              document
+                .getElementById('result-change-history-modal')
+                .classList.remove('open')
+            "
+          >
+            ✕
+          </button>
+        </div>
+        <div
+          class="modal-body"
+          id="result-change-history-body"
+          style="max-height: 70vh; overflow-y: auto"
+        ></div>
+        <div class="modal-footer">
+          <button
+            class="btn btn-success"
+            onclick="
+              document
+                .getElementById('result-change-history-modal')
+                .classList.remove('open')
+            "
+          >
+            Закрити
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export fields modal -->
+    <div class="modal-overlay" id="export-fields-modal">
+      <div class="modal" style="max-width: 680px">
+        <div class="modal-header">
+          <h3 class="modal-title">Налаштування полів експорту</h3>
+          <button class="btn-close" id="btn-close-export-fields-modal">
+            ✕
+          </button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto">
+          <p style="color: var(--text-2); margin-bottom: 14px">
+            Оберіть поля, які має містити експорт, і при потребі змініть
+            заголовки.
+          </p>
+          <div id="export-fields-list"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="btn-close-export-fields-modal-2">
+            Скасувати
+          </button>
+          <button class="btn btn-success" id="btn-save-export-fields">
+            Зберегти
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     ПАНЕЛЬ ВІЗУАЛЬНОГО ВИБОРУ СЕЛЕКТОРА
+═══════════════════════════════════════════════════════════════════ -->
+    <div id="selector-panel">
+      <div id="selector-toolbar">
+        <strong>🎯 Візуальний вибір елементів</strong>
+        <input
+          id="selector-url-input"
+          type="url"
+          class="form-control"
+          style="
+            width: 400px;
+            background: #334155;
+            border-color: #475569;
+            color: #fff;
+          "
+          placeholder="https://example.com/сторінка-для-перегляду"
+        />
+        <button class="btn btn-ghost btn-sm" id="btn-load-url">
+          Завантажити
+        </button>
+        <button class="btn btn-ghost btn-sm" id="btn-toggle-picker">
+          🎯 Увімкнути вибір
+        </button>
+        <button class="btn btn-success btn-sm" id="btn-use-selector">
+          ✓ Застосувати
+        </button>
+        <div class="ml-auto">
+          <button class="btn btn-danger btn-sm" id="btn-close-selector">
+            ✕ Закрити
+          </button>
+        </div>
+      </div>
+      <div id="selector-iframe-wrap">
+        <iframe
+          id="selector-iframe"
+          sandbox="allow-scripts allow-same-origin allow-forms"
+        ></iframe>
+      </div>
+      <div id="selector-output">
+        // Натисніть «Увімкнути вибір», потім клікніть на елемент сторінки
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     СПОВІЩЕННЯ
+═══════════════════════════════════════════════════════════════════ -->
+    <div id="toast-container"></div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     СКРИПТИ
+═══════════════════════════════════════════════════════════════════ -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/selector.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/user-friendly.js"></script>
+    <script>
+      function switchAuthTab(tab) {
+        console.log("Переключення вкладки:", tab);
+        const isLogin = tab === "login";
+
+        const loginForm = document.getElementById("login-form");
+        const registerForm = document.getElementById("register-form");
+
+        if (!loginForm || !registerForm) {
+          console.error("Форми не знайдені");
+          return;
+        }
+
+        loginForm.classList.toggle("hidden", !isLogin);
+        registerForm.classList.toggle("hidden", isLogin);
+
+        document.querySelectorAll("#login-screen .tab").forEach((el) => {
+          el.classList.toggle("active", el.dataset.tab === tab);
+        });
+      }
+
+      // Система вкладок
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll("[data-tab]").forEach((tab) => {
+          tab.addEventListener("click", () => {
+            const group = tab.dataset.tabGroup;
+            document
+              .querySelectorAll(`[data-tab][data-tab-group="${group}"]`)
+              .forEach((t) => t.classList.remove("active"));
+            document
+              .querySelectorAll(`[data-pane][data-tab-group="${group}"]`)
+              .forEach((p) => p.classList.remove("active"));
+            tab.classList.add("active");
+            const target = document.querySelector(
+              `[data-pane="${tab.dataset.tab}"][data-tab-group="${group}"]`,
+            );
+            if (target) target.classList.add("active");
+          });
+        });
+
+        // Оновлення заголовка топбару при навігації
+        document.querySelectorAll("[data-page]").forEach((el) => {
+          el.addEventListener("click", () => {
+            const titles = {
+              dashboard: "Дашборд",
+              tasks: "Задачі",
+              results: "Результати",
+              proxies: "Проксі",
+              monitor: "Черга задач",
+            };
+            document.getElementById("topbar-title").textContent =
+              titles[el.dataset.page] || "";
+          });
+        });
+      });
+    </script>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО ДОПОМОГИ
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="help-modal" style="display: none">
+      <div
+        class="modal"
+        style="max-width: 700px; max-height: 80vh; overflow-y: auto"
+      >
+        <div class="modal-header">
+          <span>Допомога — Web Parser Pro</span>
+          <button class="btn-close" onclick="hideHelp()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="line-height: 1.6">
+            <h3>🚀 Швидкий старт</h3>
+            <ol>
+              <li>
+                <strong>Створіть завдання:</strong> Натисніть "Завдання" →
+                "Створити завдання"
+              </li>
+              <li>
+                <strong>Налаштуйте URL:</strong> Введіть адресу веб-сайту для
+                парсингу
+              </li>
+              <li>
+                <strong>Оберіть селектори:</strong> Використовуйте візуальний
+                селектор або введіть CSS селектори вручну
+              </li>
+              <li>
+                <strong>Запустіть:</strong> Натисніть "Запустити негайно" або
+                налаштуйте розклад
+              </li>
+              <li>
+                <strong>Перегляньте результати:</strong> Вкладка "Результати"
+                містить витягнуті дані
+              </li>
+            </ol>
+
+            <h3>🎯 Візуальний селектор</h3>
+            <p>Для легкого вибору елементів на сторінці:</p>
+            <ol>
+              <li>Натисніть "🎯 Вибрати" поруч із полем селектора</li>
+              <li>Введіть URL цільового сайту</li>
+              <li>Наведіть курсор на елемент — він підсвітиться</li>
+              <li>Клікніть для вибору елемента</li>
+              <li>Селектор автоматично згенерується</li>
+            </ol>
+
+            <h3>⚙️ Основні налаштування завдання</h3>
+            <ul>
+              <li>
+                <strong>Рушій:</strong> "Статичний" для звичайних сайтів,
+                "Динамічний" для сайтів з JavaScript
+              </li>
+              <li>
+                <strong>Контейнер елементів:</strong> CSS селектор, що містить
+                список товарів/елементів
+              </li>
+              <li>
+                <strong>Поля:</strong> Додайте назви полів (title, price, image)
+                та їх селектори
+              </li>
+              <li>
+                <strong>Пагінація:</strong> Налаштуйте, як переходити між
+                сторінками
+              </li>
+              <li><strong>Проксі:</strong> Увімкніть для обходу блокувань</li>
+            </ul>
+
+            <h3>📊 Експорт даних</h3>
+            <p>Після завершення парсингу експортуйте дані:</p>
+            <ul>
+              <li><strong>JSON:</strong> Структуровані дані для розробників</li>
+              <li><strong>CSV:</strong> Табличний формат для Excel</li>
+              <li><strong>Excel:</strong> Файл .xlsx з форматуванням</li>
+            </ul>
+
+            <h3>🔧 Управління проксі</h3>
+            <ol>
+              <li>Перейдіть до розділу "Проксі"</li>
+              <li>Додайте проксі вручну або імпортуйте списком</li>
+              <li>Натисніть "Перевірити всі" для тестування</li>
+              <li>Використовуйте активні проксі в завданнях</li>
+            </ol>
+
+            <h3>⏰ Планувальник</h3>
+            <p>Автоматичний запуск завдань:</p>
+            <ul>
+              <li>Увімкніть планувальник у налаштуваннях завдання</li>
+              <li>
+                Введіть cron вираз (наприклад: "0 */6 * * *" — кожні 6 годин)
+              </li>
+              <li>Використовуйте "Пауза"/"Відновити" для керування</li>
+            </ul>
+
+            <h3>❓ Поширені проблеми</h3>
+            <ul>
+              <li>
+                <strong>Завдання не запускається:</strong> Перевірте URL та
+                селектори
+              </li>
+              <li>
+                <strong>Неправильні дані:</strong> Оновіть селектори — HTML
+                структура могла змінитися
+              </li>
+              <li>
+                <strong>Повільне виконання:</strong> Зменшіть кількість
+                одночасних завдань
+              </li>
+              <li>
+                <strong>Блокування:</strong> Додайте проксі або збільште
+                затримки
+              </li>
+            </ul>
+
+            <h3>📚 Додаткові ресурси</h3>
+            <ul>
+              <li>
+                <a href="/api-docs" target="_blank">API Документація</a> — для
+                розробників
+              </li>
+              <li>
+                <a
+                  href="https://developer.mozilla.org/uk/docs/Web/CSS/CSS_Selectors"
+                  target="_blank"
+                  >CSS Селектори</a
+                >
+                — довідка
+              </li>
+              <li>
+                <a href="https://crontab.guru/" target="_blank"
+                  >Cron Generator</a
+                >
+                — для планувальника
+              </li>
+            </ul>
+
+            <div
+              style="
+                margin-top: 20px;
+                padding: 15px;
+                background: var(--bg-2);
+                border-radius: 8px;
+              "
+            >
+              <strong>💡 Порада:</strong> Почніть з простого завдання на
+              тестовому сайті, щоб освоїти інтерфейс.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Forward to API Modal -->
+    <div class="modal-overlay" id="forward-api-modal">
+      <div class="modal" style="max-width: 560px">
+        <div class="modal-header">
+          <h3 class="modal-title">Відправити на зовнішній API</h3>
+          <button class="btn-close" id="btn-close-forward-modal">✕</button>
+        </div>
+        <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px">
+          <div id="forward-selection-info" style="font-size: 13px; color: var(--text-2); padding: 8px 12px; background: var(--bg-2); border-radius: 6px">
+            Виберіть рядки у таблиці (або натисніть "☑ Виділити зміни")
+          </div>
+          <div class="form-group">
+            <label class="form-label">URL зовнішнього API *</label>
+            <input id="fwd-url" type="url" class="form-control" placeholder="https://api.example.com/endpoint" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">HTTP метод</label>
+              <select id="fwd-method" class="form-control">
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="GET">GET</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Додаткові заголовки (JSON)</label>
+            <textarea id="fwd-headers" class="form-control" rows="2" placeholder='{"Authorization": "Bearer TOKEN", "Content-Type": "application/json"}'></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">
+              Шаблон тіла запиту
+              <small style="color: var(--text-2)">— використовуй <code>{{назва_поля}}</code></small>
+            </label>
+            <textarea id="fwd-body-template" class="form-control" rows="4" placeholder='{"id": "{{артикул}}", "price": "{{ціна}}", "name": "{{назва}}"}'></textarea>
+            <p class="form-hint">Якщо порожньо — відправляється весь об'єкт data запису без змін</p>
+            <div id="fwd-field-tags" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px"></div>
+          </div>
+          <div id="fwd-result-summary" style="display:none; padding: 8px 12px; border-radius: 6px; font-size: 13px"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="btn-close-forward-modal-2">Скасувати</button>
+          <button class="btn btn-primary" id="btn-do-forward">→ Надіслати вибрані</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TXT Export Modal -->
+    <div class="modal-overlay" id="txt-export-modal">
+      <div class="modal" style="max-width: 480px">
+        <div class="modal-header">
+          <h3 class="modal-title">Експорт TXT</h3>
+          <button class="btn btn-ghost btn-sm" id="btn-close-txt-modal">
+            ✕
+          </button>
+        </div>
+        <div
+          class="modal-body"
+          style="display: flex; flex-direction: column; gap: 14px"
+        >
+          <div class="form-group">
+            <label class="form-label"
+              >Шаблон рядка
+              <small style="color: var(--text-2)"
+                >— використовуй <code>{{назва_поля}}</code></small
+              >
+            </label>
+            <textarea
+              id="txt-template"
+              class="form-control"
+              rows="3"
+              placeholder="{{назва}} | {{ціна}} | {{url}}&#10;Залиш порожнім — буде табличний формат"
+            ></textarea>
+            <p class="form-hint">
+              Якщо порожньо — рядки розділяються роздільником полів
+            </p>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Роздільник полів</label>
+              <input
+                id="txt-field-sep"
+                class="form-control"
+                value="&#9;"
+                placeholder="Tab, ; , | …"
+              />
+              <p class="form-hint">За замовчуванням: Tab</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Роздільник записів</label>
+              <input
+                id="txt-record-sep"
+                class="form-control"
+                value="&#10;"
+                placeholder="\n"
+              />
+              <p class="form-hint">За замовчуванням: новий рядок</p>
+            </div>
+          </div>
+          <label
+            style="
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              cursor: pointer;
+            "
+          >
+            <input type="checkbox" id="txt-include-header" checked />
+            Включити заголовки колонок (лише в табличному режимі)
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="btn-close-txt-modal-2">
+            Скасувати
+          </button>
+          <button class="btn btn-success" id="btn-do-export-txt">
+            ⬇ Завантажити TXT
+          </button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
