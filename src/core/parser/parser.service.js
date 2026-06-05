@@ -985,6 +985,11 @@ class ParserService {
 
       return { runId, totalRecords, duration, pages: pagesVisited };
     } catch (err) {
+      // If a cancel was requested but the task threw before the cancellation check
+      // ran inside the pagination loop, the taskId would stay in the Set forever
+      // and cause the next run of this task to be immediately cancelled.
+      cancelledTasks.delete(String(task._id));
+
       const duration = Date.now() - startTime;
       logger.error("Парсинг завершився з помилкою", {
         taskId: task._id,

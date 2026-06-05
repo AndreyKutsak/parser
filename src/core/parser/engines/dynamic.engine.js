@@ -65,20 +65,35 @@ const launchBrowser = async (proxy = null) => {
 // Кожен унікальний проксі отримує один довгоживучий браузер.
 // fetchPage відкриває/закриває лише сторінку — не браузер.
 // Це зменшує пікове споживання пам'яті з N*400MB до ~1-2 браузери.
-const activeBrowsers = new Map(); // proxyKey → Browser
+const activeBrowsers = new Map();  // proxyKey → Browser
+const pendingLaunches = new Map(); // proxyKey → Promise<Browser>
 
 const _proxyKey = (proxy) =>
   proxy ? `${proxy.protocol}://${proxy.host}:${proxy.port}` : '__none__';
 
 const _getBrowser = async (proxy) => {
   const key = _proxyKey(proxy);
-  let browser = activeBrowsers.get(key);
-  if (browser?.isConnected()) return browser;
 
-  browser = await launchBrowser(proxy);
-  activeBrowsers.set(key, browser);
-  browser.on('disconnected', () => activeBrowsers.delete(key));
-  return browser;
+  const existing = activeBrowsers.get(key);
+  if (existing?.isConnected()) return existing;
+
+  // Serialize concurrent launches for the same proxy key.
+  // Without this, two parallel fetchPage calls would both see no active browser
+  // and both call launchBrowser — the second result overwrites the first in the Map,
+  // leaving an orphaned Chromium process that is never closed (memory/process leak).
+  const pending = pendingLaunches.get(key);
+  if (pending) return pending;
+
+  const launch = launchBrowser(proxy)
+    .then(browser => {
+      activeBrowsers.set(key, browser);
+      browser.on('disconnected', () => activeBrowsers.delete(key));
+      return browser;
+    })
+    .finally(() => pendingLaunches.delete(key));
+
+  pendingLaunches.set(key, launch);
+  return launch;
 };
 
 /**
@@ -87,6 +102,7 @@ const _getBrowser = async (proxy) => {
 const closeAll = async () => {
   const entries = [...activeBrowsers.values()];
   activeBrowsers.clear();
+  pendingLaunches.clear();
   await Promise.allSettled(entries.map(b => b.close()));
 };
 

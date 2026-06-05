@@ -27,6 +27,8 @@ const redisOpts = () => ({
   connectTimeout:      3000,
 });
 
+let pubInstance = null;
+
 /**
  * Call once in the WORKER process.
  * Patches parseEvents.emit to forward every event to Redis.
@@ -36,6 +38,7 @@ async function initPublisher(parseEvents) {
   const pub = new IORedis(redisOpts());
   try {
     await pub.connect();
+    pubInstance = pub;
     const _emit = parseEvents.emit.bind(parseEvents);
     parseEvents.emit = (taskId, event) => {
       _emit(taskId, event);
@@ -45,6 +48,20 @@ async function initPublisher(parseEvents) {
   } catch {
     // Redis unavailable — events stay in-process only (no SSE from worker)
   }
+}
+
+/**
+ * Call in the WORKER shutdown handler to release the Redis connection.
+ * Prevents the event loop from being kept alive by ioredis reconnect timers.
+ */
+async function close() {
+  if (!pubInstance) return;
+  try {
+    await pubInstance.quit();
+  } catch {
+    pubInstance.disconnect();
+  }
+  pubInstance = null;
 }
 
 /**
@@ -69,4 +86,4 @@ async function initSubscriber(parseEvents) {
   }
 }
 
-module.exports = { initPublisher, initSubscriber };
+module.exports = { initPublisher, initSubscriber, close };
