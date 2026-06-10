@@ -10,6 +10,18 @@
  */
 const { applyTransform, resolveUrl } = require('../../utils/helpers');
 
+// Lazy-load xpath deps once at module level (not inside the hot path)
+let xpathLib = null;
+let XmlDOMParser = null;
+try {
+  xpathLib = require('xpath');
+  XmlDOMParser = require('xmldom').DOMParser;
+} catch { /* xpath/xmldom not installed — XPath selectors disabled */ }
+
+// Cache the serialized HTML DOM per cheerio element so multiple XPath fields
+// on the same element don't re-serialize + re-parse the same HTML each time.
+const xpathDocCache = new WeakMap();
+
 /**
  * Витягує значення одного поля з елемента-контейнера.
  *
@@ -106,6 +118,8 @@ const extractAll = ($, itemSelector, fields, baseUrl = '') => {
  * Базова підтримка XPath через пакети xpath + xmldom.
  * Повертає об'єкт, сумісний з cheerio-інтерфейсом.
  * При відсутності пакетів повертає порожню колекцію.
+ * Кешує розпарсений DOM per-element через WeakMap — повторні виклики
+ * для різних полів одного елемента не серіалізують HTML вдруге.
  *
  * @param {CheerioAPI} $ - Екземпляр cheerio
  * @param {object}    el - Кореневий елемент
@@ -113,12 +127,16 @@ const extractAll = ($, itemSelector, fields, baseUrl = '') => {
  * @returns {object} Псевдо-cheerio об'єкт із методами each/first/length
  */
 const xpathSelect = ($, el, xpathExpr) => {
+  if (!xpathLib || !XmlDOMParser) {
+    return { length: 0, each: () => {}, first: () => ({ length: 0, text: () => '', attr: () => null }) };
+  }
   try {
-    const xpath = require('xpath');
-    const { DOMParser } = require('xmldom');
-    const html = $.html(el);
-    const doc  = new DOMParser().parseFromString(html, 'text/html');
-    const nodes = xpath.select(xpathExpr, doc);
+    let doc = xpathDocCache.get(el);
+    if (!doc) {
+      doc = new XmlDOMParser().parseFromString($.html(el), 'text/html');
+      xpathDocCache.set(el, doc);
+    }
+    const nodes = xpathLib.select(xpathExpr, doc);
     return {
       length: nodes.length,
       each:   (fn) => nodes.forEach((n, i) => fn(i, n)),

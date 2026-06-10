@@ -11,65 +11,64 @@ try {
   logger.warn('BullMQ not installed — queue disabled');
 }
 
-const QUEUE_NAME = 'parser';
+const STATIC_QUEUE  = 'parser';
+const DYNAMIC_QUEUE = 'parser:dynamic';
+
+const JOB_DEFAULTS = {
+  attempts:         3,
+  backoff:          { type: 'exponential', delay: 5000 },
+  removeOnComplete: 100,
+  removeOnFail:     50,
+};
 
 class QueueManager {
   constructor() {
-    this.queue = null;
-    this.queueEvents = null;
+    this.staticQueue  = null;
+    this.dynamicQueue = null;
+    this.queueEvents  = null;
     this._enabled = false;
   }
 
   get enabled() { return this._enabled; }
 
   /**
-   * Initialize the queue — connects to Redis.
+   * Initialize both queues — connects to Redis.
    * If connection fails, queue runs in disabled mode and tasks run synchronously.
-   * Uses retryStrategy: () => null so ioredis never tries to reconnect on failure.
    */
   async init() {
     if (!BullMQ) return;
 
-    // Build ioredis connection options that disable auto-reconnect
     const connection = {
       host:     process.env.REDIS_HOST     || 'localhost',
       port:     parseInt(process.env.REDIS_PORT) || 6379,
       password: process.env.REDIS_PASSWORD || undefined,
-      // Fail fast — do not buffer commands or retry connections
       lazyConnect:           true,
       enableOfflineQueue:    false,
       maxRetriesPerRequest:  0,
-      // Return null from retryStrategy to disable all reconnection attempts
       retryStrategy:         () => null,
       reconnectOnError:      () => false,
       connectTimeout:        3000,
     };
 
-    let queue = null;
-    let queueEvents = null;
+    let staticQueue  = null;
+    let dynamicQueue = null;
+    let queueEvents  = null;
 
     try {
-      queue = new BullMQ.Queue(QUEUE_NAME, {
-        connection,
-        defaultJobOptions: {
-          attempts:         3,
-          backoff:          { type: 'exponential', delay: 5000 },
-          removeOnComplete: 100,
-          removeOnFail:     50,
-        },
-      });
+      staticQueue  = new BullMQ.Queue(STATIC_QUEUE,  { connection, defaultJobOptions: JOB_DEFAULTS });
+      dynamicQueue = new BullMQ.Queue(DYNAMIC_QUEUE, { connection, defaultJobOptions: JOB_DEFAULTS });
+      staticQueue.on('error',  () => {});
+      dynamicQueue.on('error', () => {});
 
-      // Silence the internal error events so they don't crash the process
-      queue.on('error', () => {});
-
-      queueEvents = new BullMQ.QueueEvents(QUEUE_NAME, { connection });
+      queueEvents = new BullMQ.QueueEvents(STATIC_QUEUE, { connection });
       queueEvents.on('error', () => {});
 
-      // Test the actual connection (will throw if Redis is down)
-      await queue.getJobCounts();
+      // Test connection
+      await staticQueue.getJobCounts();
 
-      this.queue = queue;
-      this.queueEvents = queueEvents;
+      this.staticQueue  = staticQueue;
+      this.dynamicQueue = dynamicQueue;
+      this.queueEvents  = queueEvents;
       this._enabled = true;
 
       logger.info('Queue connected to Redis', {
@@ -78,69 +77,73 @@ class QueueManager {
       });
 
     } catch (err) {
-      // Redis not available — shut down the objects cleanly so ioredis stops
       logger.warn('Redis unavailable — falling back to synchronous mode', {
         error: err.message,
       });
 
-      // Close quietly (suppress any close errors)
-      await queue?.close().catch(() => {});
+      await staticQueue?.close().catch(() => {});
+      await dynamicQueue?.close().catch(() => {});
       await queueEvents?.close().catch(() => {});
 
-      this.queue = null;
-      this.queueEvents = null;
+      this.staticQueue  = null;
+      this.dynamicQueue = null;
+      this.queueEvents  = null;
       this._enabled = false;
     }
   }
 
   /**
-   * Add a parse job to the queue.
-   * If Redis is not available, runs the task synchronously and returns the result.
+   * Add a parse job to the appropriate queue based on engine type.
+   * engine='dynamic' → parser:dynamic (lower concurrency worker)
+   * engine='static'  → parser        (higher concurrency worker)
    */
-  async addJob(taskId, options = {}) {
-    if (!this._enabled || !this.queue) {
+  async addJob(taskId, { priority = 0, delay = 0, engine = 'static' } = {}) {
+    if (!this._enabled) {
       logger.info('Queue disabled: running task synchronously', { taskId });
-      const taskRepo     = require('../db/repositories/task.repository');
+      const taskRepo      = require('../db/repositories/task.repository');
       const parserService = require('../core/parser/parser.service');
       const task = await taskRepo.findById(taskId);
       if (!task) throw new Error(`Task ${taskId} not found`);
       return parserService.run(task);
     }
 
-    const job = await this.queue.add('parse', { taskId }, {
-      priority: options.priority || 0,
-      delay:    options.delay    || 0,
-    });
+    const queue = engine === 'dynamic' ? this.dynamicQueue : this.staticQueue;
+    const job = await queue.add('parse', { taskId }, { priority, delay });
 
-    logger.info('Job queued', { jobId: job.id, taskId });
+    logger.info('Job queued', { jobId: job.id, taskId, engine });
     return { jobId: job.id, queued: true };
   }
 
   async getJob(jobId) {
-    if (!this.queue) return null;
-    return BullMQ.Job.fromId(this.queue, jobId);
+    if (!this.staticQueue) return null;
+    return BullMQ.Job.fromId(this.staticQueue, jobId);
   }
 
   async getStats() {
-    if (!this.queue) return { enabled: false };
+    if (!this.staticQueue) return { enabled: false };
     try {
-      const counts = await this.queue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed');
-      return { enabled: true, ...counts };
+      const [s, d] = await Promise.all([
+        this.staticQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+        this.dynamicQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+      ]);
+      return { enabled: true, static: s, dynamic: d };
     } catch {
       return { enabled: false };
     }
   }
 
   async clearCompleted() {
-    if (!this.queue) return;
-    await this.queue.clean(0, 100, 'completed').catch(() => {});
+    await this.staticQueue?.clean(0, 100, 'completed').catch(() => {});
+    await this.dynamicQueue?.clean(0, 100, 'completed').catch(() => {});
   }
 
   async close() {
-    await this.queue?.close().catch(() => {});
+    await this.staticQueue?.close().catch(() => {});
+    await this.dynamicQueue?.close().catch(() => {});
     await this.queueEvents?.close().catch(() => {});
-    this.queue = null;
-    this.queueEvents = null;
+    this.staticQueue  = null;
+    this.dynamicQueue = null;
+    this.queueEvents  = null;
     this._enabled = false;
   }
 }

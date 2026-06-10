@@ -12,8 +12,12 @@ const logger = require('../../utils/logger');
 const eventBridge = require('../../utils/event-bridge');
 const parseEvents = require('../../utils/parse-events');
 
-const QUEUE_NAME = 'parser';
-const CONCURRENCY = parseInt(process.env.MAX_CONCURRENT_TASKS) || 3;
+const STATIC_QUEUE   = 'parser';
+const DYNAMIC_QUEUE  = 'parser:dynamic';
+// Static (axios) tasks are cheap — allow higher concurrency
+const STATIC_CONCURRENCY  = parseInt(process.env.MAX_CONCURRENT_TASKS)         || 5;
+// Dynamic (Puppeteer) tasks are heavy — limit to avoid memory pressure
+const DYNAMIC_CONCURRENCY = parseInt(process.env.MAX_CONCURRENT_DYNAMIC_TASKS) || 2;
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.WORKER_SHUTDOWN_TIMEOUT_MS) || 30_000;
 
 const connection = {
@@ -32,44 +36,45 @@ async function main() {
   // Forward parse events from this worker process to the main server via Redis Pub/Sub
   await eventBridge.initPublisher(parseEvents);
 
-  logger.info('Parser worker started', { concurrency: CONCURRENCY });
+  logger.info('Parser worker started', {
+    staticConcurrency: STATIC_CONCURRENCY,
+    dynamicConcurrency: DYNAMIC_CONCURRENCY,
+  });
 
-  const worker = new Worker(
-    QUEUE_NAME,
-    async (job) => {
-      const { taskId } = job.data;
-      logger.info('Processing job', { jobId: job.id, taskId });
+  const jobHandler = async (job) => {
+    const { taskId } = job.data;
+    logger.info('Processing job', { jobId: job.id, taskId });
+    const task = await taskRepo.findById(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    return parserService.run(task);
+  };
 
-      const task = await taskRepo.findById(taskId);
-      if (!task) throw new Error(`Task ${taskId} not found`);
-
-      return parserService.run(task);
+  const workerOpts = (concurrency) => ({
+    connection,
+    concurrency,
+    settings: {
+      stalledInterval: 30_000,
+      maxStalledCount: 1,
     },
-    {
-      connection,
-      concurrency: CONCURRENCY,
-      settings: {
-        stalledInterval: 30_000, // check for stalled jobs every 30s
-        maxStalledCount: 1,      // move to failed after 1 stall (not infinite retry)
-      },
-    }
-  );
-
-  worker.on('completed', (job, result) => {
-    logger.info('Job completed', { jobId: job.id, records: result?.totalRecords });
   });
 
-  worker.on('failed', (job, err) => {
-    logger.error('Job failed', { jobId: job?.id, error: err.message, stack: err.stack });
-  });
+  const staticWorker  = new Worker(STATIC_QUEUE,  jobHandler, workerOpts(STATIC_CONCURRENCY));
+  const dynamicWorker = new Worker(DYNAMIC_QUEUE, jobHandler, workerOpts(DYNAMIC_CONCURRENCY));
 
-  worker.on('stalled', (jobId) => {
-    logger.warn('Job stalled — will be retried or moved to failed', { jobId });
-  });
-
-  worker.on('error', (err) => {
-    logger.error('Worker error', { error: err.message });
-  });
+  for (const worker of [staticWorker, dynamicWorker]) {
+    worker.on('completed', (job, result) => {
+      logger.info('Job completed', { jobId: job.id, records: result?.totalRecords });
+    });
+    worker.on('failed', (job, err) => {
+      logger.error('Job failed', { jobId: job?.id, error: err.message, stack: err.stack });
+    });
+    worker.on('stalled', (jobId) => {
+      logger.warn('Job stalled — will be retried or moved to failed', { jobId });
+    });
+    worker.on('error', (err) => {
+      logger.error('Worker error', { error: err.message });
+    });
+  }
 
   let shutdownCalled = false;
   const shutdown = async (signal) => {
@@ -86,7 +91,7 @@ async function main() {
     forceExit.unref(); // don't keep the process alive just for this timer
 
     try {
-      await worker.close();
+      await Promise.all([staticWorker.close(), dynamicWorker.close()]);
       await dynamicEngine.closeAll();
       await eventBridge.close();
       await disconnect();

@@ -68,7 +68,8 @@ class ExporterService {
     taskId,
     { runId, fields = [], fieldLabels = {}, filters = {}, taskName = "Results",
       keyField = null, fieldTypes = {}, uniqueField = null, aggregateFields = [],
-      mode = null, deltaFields = [], dateFrom = null, dateTo = null } = {},
+      mode = null, deltaFields = [], dateFrom = null, dateTo = null,
+      stream = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
     const stMap = await this._loadSubTaskMap(taskId, records);
@@ -100,6 +101,11 @@ class ExporterService {
       }
     }
 
+    // Stream directly to response if provided — avoids allocating a second in-memory buffer
+    if (stream) {
+      await workbook.xlsx.write(stream);
+      return null;
+    }
     return workbook.xlsx.writeBuffer();
   }
 
@@ -248,6 +254,9 @@ class ExporterService {
    *   - "Остання зміна" — date of the newest detected change
    */
   _buildProductRows(records, stMap, keyField = null) {
+    // Pre-flatten all data objects once — avoids double-flatten later
+    const flatMap = new Map(records.map((r) => [r, this._flatten(r.data || {})]));
+
     // Group by product key
     const groups = new Map();
     for (const r of records) {
@@ -261,8 +270,8 @@ class ExporterService {
       groups.get(key).push(r);
     }
 
-    // Stable column order: first appearance wins
-    const dataKeys = this._collectKeys(records.map((r) => r.data));
+    // Stable column order: first appearance wins — use already-flattened objects
+    const dataKeys = this._collectKeysFromFlat([...flatMap.values()]);
     const stKeys = this._collectKeys([...stMap.values()].map((st) => st.lastData));
 
     const rows = [];
@@ -273,8 +282,8 @@ class ExporterService {
         new Date(a.createdAt) > new Date(b.createdAt) ? a : b,
       );
 
-      // Product data
-      const dataFlat = this._flatten(latest.data || {});
+      // Product data — reuse pre-flattened value
+      const dataFlat = flatMap.get(latest) || {};
       const base = Object.fromEntries(dataKeys.map((k) => [k, dataFlat[k] ?? ""]));
 
       // Subtask lastData — merged directly (no prefix)
@@ -460,6 +469,19 @@ class ExporterService {
     for (const obj of dataObjects) {
       if (!obj) continue;
       for (const k of Object.keys(this._flatten(obj))) {
+        if (!set.has(k)) { set.add(k); keys.push(k); }
+      }
+    }
+    return keys;
+  }
+
+  /** Same as _collectKeys but accepts already-flattened objects — no double flatten. */
+  _collectKeysFromFlat(flatObjects) {
+    const set = new Set();
+    const keys = [];
+    for (const obj of flatObjects) {
+      if (!obj) continue;
+      for (const k of Object.keys(obj)) {
         if (!set.has(k)) { set.add(k); keys.push(k); }
       }
     }

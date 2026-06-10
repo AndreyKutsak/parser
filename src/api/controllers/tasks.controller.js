@@ -300,7 +300,7 @@ exports.run = async (req, res, next) => {
     }
 
     // Queue the job (async) or run synchronously if queue disabled
-    const result = await queueManager.addJob(String(task._id));
+    const result = await queueManager.addJob(String(task._id), { engine: task.engine || 'static' });
 
     res.json({ success: true, message: "Task started", ...result });
   } catch (err) {

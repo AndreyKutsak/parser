@@ -7,7 +7,7 @@ const escapeRegex = (value) =>
 class ResultRepository {
   async findByTask(
     taskId,
-    { runId, page = 1, limit = 100, status, changed, search, createdAtFrom, createdAtTo } = {},
+    { runId, page = 1, limit = 100, status, changed, search, createdAtFrom, createdAtTo, skipCount = false } = {},
   ) {
     const filter = { taskId };
     if (runId && runId !== "undefined") filter.runId = runId;
@@ -29,15 +29,14 @@ class ResultRepository {
       }
     }
 
-    const [items, total] = await Promise.all([
-      Result.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-      Result.countDocuments(filter),
-    ]);
+    const query = Result.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
 
+    if (skipCount) {
+      const items = await query;
+      return { items, total: null, page, pages: null };
+    }
+
+    const [items, total] = await Promise.all([query, Result.countDocuments(filter)]);
     return { items, total, page, pages: Math.ceil(total / limit) };
   }
 
@@ -51,6 +50,7 @@ class ResultRepository {
       createdAtTo,
       page: 1,
       limit: 5000,
+      skipCount: true,
     });
     return result.items;
   }

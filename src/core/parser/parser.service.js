@@ -154,12 +154,12 @@ const cancellableSleep = async (taskId, min, max) => {
 };
 const staticEngine = require("./engines/static.engine");
 const dynamicEngine = require("./engines/dynamic.engine");
-const { extractAll, getNextPageUrl } = require("./selector.service");
+const { extractAll, extractRecord, getNextPageUrl } = require("./selector.service");
 const proxyManager = require("../proxy/proxy.manager");
 const resultRepo = require("../../db/repositories/result.repository");
 const taskRepo = require("../../db/repositories/task.repository");
 const Run = require("../../db/models/run.model");
-const { sleep, formatDuration, chunk } = require("../../utils/helpers");
+const { sleep, formatDuration, chunk, resolveUrl } = require("../../utils/helpers");
 const logger = require("../../utils/logger");
 
 class ParserService {
@@ -236,10 +236,6 @@ class ParserService {
       const baseRequests = requestList.filter((r) => !isTemplate(r));
       const templateRequests = requestList.filter(isTemplate);
 
-      // Only accumulate results when template requests need them for substitution
-      const needsAllResults = templateRequests.length > 0;
-      const allResults = [];
-
       // Налаштування рекурсивного обходу
       const crawlEnabled = task.options?.crawl?.enabled || false;
       const crawlSel = task.options?.crawl?.selector || "a[href]";
@@ -313,17 +309,6 @@ class ParserService {
             page: currentPage,
           });
 
-          // Check if task was stopped
-          const currentTask = await taskRepo.findById(task._id);
-          if (currentTask.status === "stopped") {
-            logger.info("Парсинг зупинено через статус stopped", {
-              taskId: task._id,
-            });
-            cancelledTasks.delete(String(task._id)); // clean up
-            currentUrl = null;
-            break;
-          }
-
           // ── Цикл повторних спроб ────────────────────────────────────────
           for (let attempt = 1; attempt <= retries; attempt++) {
             try {
@@ -366,12 +351,11 @@ class ParserService {
                 !crawlUrlTemplate &&
                 (crawlMaxDepth === 0 || 0 < crawlMaxDepth)
               ) {
-                const { resolveUrl: ru } = require("../../utils/helpers");
                 $(crawlSel).each((_, el) => {
                   const href = $(el).attr("href");
                   if (!href) return;
                   try {
-                    const abs = ru(href, currentUrl);
+                    const abs = resolveUrl(href, currentUrl);
                     if (!abs || crawlVisited.has(abs)) return;
                     if (
                       crawlSameOrigin &&
@@ -388,8 +372,6 @@ class ParserService {
               // ── Деталі: заходимо в кожне посилання ─────────────────────
               const linkSelector = task.selectors?.linkSelector;
               if (linkSelector) {
-                const { resolveUrl } = require("../../utils/helpers");
-                const { extractRecord } = require("./selector.service");
                 const detailFields = this._resolveFields(
                   task.selectors?.detailFields,
                 );
@@ -631,14 +613,6 @@ class ParserService {
               status: "error",
               error: lastError.message,
             });
-            if (needsAllResults) allResults.push({
-              taskId: task._id,
-              runId,
-              url: currentUrl,
-              page: currentPage,
-              status: "error",
-              error: lastError.message,
-            });
             break;
           }
 
@@ -713,17 +687,15 @@ class ParserService {
             await resultRepo.insertMany(resultsToSave);
             await sendNotification(task, runId, resultsToSave, "page");
           }
-          if (needsAllResults) allResults.push(...resultsToSave);
 
           totalRecords += resultsToSave.length;
           pagesVisited++;
           taskRepo.update(task._id, { 'stats.lastActivity': new Date() }).catch(() => {});
           currentPage += (pagination.type === "url-pattern" ? (pagination.pageStep ?? 1) : 1);
-          // Оновлюємо Run після кожної сторінки
-          await Run.findOneAndUpdate(
-            { runId },
-            { totalRecords, totalPages: pagesVisited },
-          );
+          // Оновлюємо Run кожні 10 сторінок, щоб не навантажувати MongoDB
+          if (pagesVisited % 10 === 0) {
+            Run.findOneAndUpdate({ runId }, { totalRecords, totalPages: pagesVisited }).catch(() => {});
+          }
 
           // Ввічлива затримка між сторінками (переривається при скасуванні)
           if (currentUrl && pagesVisited < maxPages) {
@@ -733,7 +705,6 @@ class ParserService {
 
         // ── Crawl: рекурсивний обхід знайдених посилань ─────────────────
         if (crawlEnabled && crawlQueue.length > 0) {
-          const { resolveUrl: ru } = require("../../utils/helpers");
           const crawlLimit = crawlMaxRequests > 0 ? crawlMaxRequests : Infinity;
           while (crawlQueue.length > 0 && crawlDone < crawlLimit) {
             if (cancelledTasks.has(String(task._id))) break;
@@ -801,7 +772,7 @@ class ParserService {
                     const href = $(el).attr("href");
                     if (!href) return;
                     try {
-                      const abs = ru(href, crawlUrl);
+                      const abs = resolveUrl(href, crawlUrl);
                       if (!abs || crawlVisited.has(abs)) return;
                       if (
                         crawlSameOrigin &&
@@ -832,11 +803,12 @@ class ParserService {
               if (toSave.length) {
                 await resultRepo.insertMany(toSave);
                 await sendNotification(task, runId, toSave, "crawl");
-                if (needsAllResults) allResults.push(...toSave);
                 totalRecords += toSave.length;
               }
               crawlDone++;
-              await Run.findOneAndUpdate({ runId }, { totalRecords });
+              if (crawlDone % 10 === 0) {
+                Run.findOneAndUpdate({ runId }, { totalRecords }).catch(() => {});
+              }
               emit(task._id, {
                 type: "page:fetch",
                 runId,
@@ -867,14 +839,18 @@ class ParserService {
       }
 
       // ── Шаблонні запити: підставляємо поля зі зібраних результатів ────────
-      if (templateRequests.length && allResults.length) {
+      if (templateRequests.length) {
+        // Завантажуємо збережені результати з БД — не тримаємо їх у пам'яті весь run
+        const savedResults = await resultRepo.findAllByRun(String(task._id), runId);
+
+        if (savedResults.length) {
         const substitute = (str, item) =>
           String(str).replace(/\{\{([^}]+)\}\}/g, (_, k) =>
             String(item[k.trim()] ?? ""),
           );
 
         for (const tmplReq of templateRequests) {
-          for (const result of allResults) {
+          for (const result of savedResults) {
             if (cancelledTasks.has(String(task._id))) break;
             const itemData = result.data ?? {};
             const expandedUrl = substitute(tmplReq.url, itemData);
@@ -916,7 +892,6 @@ class ParserService {
               if (toSave.length) {
                 await resultRepo.insertMany(toSave);
                 await sendNotification(task, runId, toSave, "template");
-                allResults.push(...toSave);
                 totalRecords += toSave.length;
                 pagesVisited++;
               }
@@ -940,7 +915,8 @@ class ParserService {
             await cancellableSleep(task._id, delay, delay * 2);
           }
         }
-      }
+        } // end if (savedResults.length)
+      } // end if (templateRequests.length)
 
       const duration = Date.now() - startTime;
       const now = new Date();

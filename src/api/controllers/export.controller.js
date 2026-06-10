@@ -192,24 +192,24 @@ exports.excel = async (req, res, next) => {
     const task = await getTaskOrFail(req.params.taskId, res);
     if (!task) return;
     const p = parseExportParams(req.query);
-    const buffer = await exporterService.toExcel(String(task._id), {
-      runId: req.query.runId,
-      taskName: task.name,
-      keyField: task.selectors?.keyField || null,
-      ...p,
-    });
 
     const filename = req.query.runId
       ? `${sanitize(task.category || task.name)}_run_${req.query.runId.slice(-8)}`
       : `${sanitize(task.category || task.name)}`;
 
-    res
-      .set({
-        "Content-Type":
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": createContentDisposition(filename, "xlsx"),
-      })
-      .send(buffer);
+    res.set({
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": createContentDisposition(filename, "xlsx"),
+    });
+
+    // Pass res directly — ExcelJS streams the workbook without a second in-memory buffer
+    await exporterService.toExcel(String(task._id), {
+      runId: req.query.runId,
+      taskName: task.name,
+      keyField: task.selectors?.keyField || null,
+      ...p,
+      stream: res,
+    });
   } catch (err) {
     next(err);
   }
