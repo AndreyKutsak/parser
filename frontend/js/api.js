@@ -68,6 +68,11 @@ const API = (() => {
       return request("GET", `/tasks/${taskId}/results?` + q);
     },
     runs: (taskId) => request("GET", `/tasks/${taskId}/results/runs`),
+    search: (taskId, field, value, limit = 1000) => {
+      const q = new URLSearchParams({ field, value, limit });
+      return fetch(`${BASE}/tasks/${taskId}/results/search?${q}`)
+        .then((r) => r.json());
+    },
     count: (taskId) => request("GET", `/tasks/${taskId}/results/count`),
     delete: (taskId, p) =>
       request(

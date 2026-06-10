@@ -90,33 +90,123 @@ exports.getRuns = async (req, res, next) => {
  * @swagger
  * /api/tasks/{taskId}/results/search:
  *   get:
- *     summary: Пошук результатів за полем та значенням
+ *     summary: Пошук результатів за назвою поля та значенням
+ *     description: |
+ *       Публічний endpoint — авторизація **не потрібна**.
+ *
+ *       Повертає всі збережені результати задачі, де `data.<field> === value`.
+ *
+ *       **Приклади запитів:**
+ *       ```
+ *       GET /api/tasks/665abc/results/search?field=price&value=100
+ *       GET /api/tasks/665abc/results/search?field=status&value=active&limit=50
+ *       GET /api/tasks/665abc/results/search?field=category&value=electronics&limit=500
+ *       ```
+ *
+ *       **Обмеження:** максимум 5 000 записів за один запит.
  *     tags: [Результати]
- *     security:
- *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: taskId
  *         required: true
- *         schema: { type: string }
+ *         schema:
+ *           type: string
+ *         description: MongoDB ObjectId задачі
+ *         example: "665abc123def456789012345"
  *       - in: query
  *         name: field
  *         required: true
- *         schema: { type: string }
- *         description: Назва поля всередині data (напр. "price")
+ *         schema:
+ *           type: string
+ *         description: |
+ *           Назва поля всередині об'єкта `data` (підтримуються вкладені поля через крапку,
+ *           напр. `details.price`).
+ *         example: price
  *       - in: query
  *         name: value
  *         required: true
- *         schema: { type: string }
- *         description: Значення для пошуку
+ *         schema:
+ *           type: string
+ *         description: Значення для точного збігу. Рядок, число або булеве значення.
+ *         example: "100"
  *       - in: query
  *         name: limit
- *         schema: { type: integer, default: 1000 }
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           default: 1000
+ *           minimum: 1
+ *           maximum: 5000
+ *         description: Максимальна кількість записів у відповіді.
  *     responses:
  *       200:
- *         description: Масив збігів у форматі JSON
+ *         description: Список результатів, що відповідають критерію пошуку
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 total:
+ *                   type: integer
+ *                   description: Кількість знайдених записів
+ *                   example: 3
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       _id:        { type: string, example: "665abc000000000000000001" }
+ *                       taskId:     { type: string, example: "665abc123def456789012345" }
+ *                       runId:      { type: string, example: "f47ac10b-58cc-4372-a567-0e02b2c3d479" }
+ *                       url:        { type: string, example: "https://example.com/products" }
+ *                       detailUrl:  { type: string, nullable: true, example: "https://example.com/product/42" }
+ *                       page:       { type: integer, example: 1 }
+ *                       seq:        { type: integer, example: 0 }
+ *                       data:
+ *                         type: object
+ *                         description: Витягнуті дані (структура залежить від конфігурації задачі)
+ *                         example: { "name": "Product A", "price": "100", "stock": "in stock" }
+ *                       status:     { type: string, enum: [ok, error], example: "ok" }
+ *                       fieldChanges:
+ *                         type: array
+ *                         description: Зміни значень порівняно з попереднім запуском
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             fieldName: { type: string }
+ *                             oldValue:  { }
+ *                             newValue:  { }
+ *                             changedAt: { type: string, format: date-time }
+ *                       createdAt:  { type: string, format: date-time }
+ *             example:
+ *               success: true
+ *               total: 2
+ *               items:
+ *                 - _id: "665abc000000000000000001"
+ *                   taskId: "665abc123def456789012345"
+ *                   runId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+ *                   url: "https://example.com/products"
+ *                   detailUrl: null
+ *                   page: 1
+ *                   seq: 0
+ *                   data: { name: "Product A", price: "100", stock: "in stock" }
+ *                   status: "ok"
+ *                   fieldChanges: []
+ *                   createdAt: "2026-06-10T14:00:00.000Z"
  *       400:
- *         description: field або value не передано
+ *         description: Не передано обов'язковий параметр `field` або `value`
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: false }
+ *                 message: { type: string, example: "field and value are required" }
+ *       404:
+ *         description: Задача не знайдена або результатів немає (повертає порожній масив, не 404)
  */
 exports.search = async (req, res, next) => {
   try {

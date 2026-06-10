@@ -2847,6 +2847,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       sec.style.display = "none";
     }
   });
+
+  document.getElementById("btn-open-search")?.addEventListener("click", () => {
+    const sec = document.getElementById("search-section");
+    if (!sec) return;
+    sec.style.display = sec.style.display === "none" ? "" : "none";
+  });
+
+  document.getElementById("search-field")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") searchByField();
+  });
+  document.getElementById("search-value")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") searchByField();
+  });
   document.getElementById("analytics-days")?.addEventListener("change", loadAnalytics);
 
   const closeExportMenu = () => document.getElementById("export-menu")?.classList.remove("open");
@@ -3112,4 +3125,50 @@ Object.assign(window, {
   hideHelp,
   exportSubTaskHistory,
   loadAnalytics,
+  searchByField,
+  copySearchUrl,
 });
+
+// ── Search by field tester ────────────────────────────────────────────────
+async function searchByField() {
+  const field = document.getElementById("search-field")?.value?.trim();
+  const value = document.getElementById("search-value")?.value ?? "";
+  const limit = parseInt(document.getElementById("search-limit")?.value) || 100;
+  const taskId = state.selectedTaskId;
+
+  if (!taskId) return;
+  if (!field || value === "") {
+    UI.toast("Вкажіть назву поля та значення", "warning");
+    return;
+  }
+
+  const params = new URLSearchParams({ field, value, limit });
+  const url = `${location.origin}/api/tasks/${taskId}/results/search?${params}`;
+  document.getElementById("search-url-input").value = url;
+  document.getElementById("search-url-row").style.display = "";
+
+  const btn = document.getElementById("btn-do-search");
+  UI.loading(btn, true);
+  document.getElementById("search-result-wrap").style.display = "none";
+
+  try {
+    const data = await API.results.search(taskId, field, value, limit);
+    const count = data.total ?? data.items?.length ?? 0;
+    document.getElementById("search-result-count").textContent = `${count} збігів`;
+    document.getElementById("search-result-pre").textContent =
+      JSON.stringify(data.items ?? data, null, 2);
+    document.getElementById("search-result-wrap").style.display = "";
+  } catch (err) {
+    UI.toast("Помилка пошуку: " + err.message, "error");
+  } finally {
+    UI.loading(btn, false);
+  }
+}
+
+function copySearchUrl() {
+  const url = document.getElementById("search-url-input")?.value;
+  if (!url) return;
+  navigator.clipboard.writeText(url)
+    .then(() => UI.toast("URL скопійовано", "success"))
+    .catch(() => UI.toast("Не вдалось скопіювати", "error"));
+}

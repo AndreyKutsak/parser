@@ -366,6 +366,7 @@
                 </div>
               </div>
               <button id="btn-open-analytics" class="btn btn-ghost btn-sm" title="Аналітика змін">📊 Аналітика</button>
+              <button id="btn-open-search" class="btn btn-ghost btn-sm" title="Пошук за полем — публічний API">🔍 Пошук</button>
               <button id="btn-forward-api" class="btn btn-ghost btn-sm" title="Відправити вибрані на зовнішній API">→ API</button>
               <button class="btn btn-danger btn-sm" onclick="deleteAllResults()">Видалити всі</button>
             </div>
@@ -393,6 +394,50 @@
                 <thead id="results-thead"></thead>
                 <tbody id="results-tbody"></tbody>
               </table>
+            </div>
+          </div>
+
+          <!-- Search by field tester (public API) -->
+          <div id="search-section" style="margin-top: 32px; display: none">
+            <div class="card">
+              <div class="card-header flex-gap" style="align-items: center">
+                <strong>🔍 Пошук за полем</strong>
+                <span style="color: var(--text-2); font-size: 12px; margin-left: 8px">публічний endpoint — авторизація не потрібна</span>
+                <button class="btn btn-ghost btn-sm ml-auto" onclick="document.getElementById('search-section').style.display='none'">✕</button>
+              </div>
+              <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px">
+                <div class="flex-gap" style="gap: 10px; align-items: flex-end; flex-wrap: wrap">
+                  <div style="flex: 1; min-width: 140px">
+                    <label class="form-label" style="font-size: 12px">Назва поля (data.*)</label>
+                    <input id="search-field" class="form-control" placeholder="напр. price" />
+                  </div>
+                  <div style="flex: 1; min-width: 140px">
+                    <label class="form-label" style="font-size: 12px">Значення</label>
+                    <input id="search-value" class="form-control" placeholder="напр. 100" />
+                  </div>
+                  <div style="width: 90px">
+                    <label class="form-label" style="font-size: 12px">Ліміт</label>
+                    <input id="search-limit" class="form-control" type="number" value="100" min="1" max="5000" />
+                  </div>
+                  <button id="btn-do-search" class="btn btn-primary btn-sm" onclick="searchByField()">Знайти</button>
+                </div>
+
+                <div id="search-url-row" style="display: none">
+                  <label class="form-label" style="font-size: 12px">Публічний URL</label>
+                  <div class="flex-gap" style="gap: 8px">
+                    <input id="search-url-input" class="form-control" style="font-family: monospace; font-size: 12px" readonly />
+                    <button class="btn btn-ghost btn-sm" onclick="copySearchUrl()">📋</button>
+                  </div>
+                </div>
+
+                <div id="search-result-wrap" style="display: none">
+                  <div class="flex-gap" style="align-items: center; margin-bottom: 6px">
+                    <span style="font-size: 12px; font-weight: 600">Відповідь</span>
+                    <span id="search-result-count" style="color: var(--text-2); font-size: 12px; margin-left: 8px"></span>
+                  </div>
+                  <pre id="search-result-pre" style="overflow-x:auto;white-space:pre;max-height:400px;overflow-y:auto;background:#f1f5f9;border:1px solid var(--border);border-radius:var(--radius);padding:12px;font-size:12px;font-family:monospace;margin:0"></pre>
+                </div>
+              </div>
             </div>
           </div>
 
