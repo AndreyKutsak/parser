@@ -154,6 +154,13 @@ class ResultRepository {
     return Result.find({ taskId, _id: { $in: objectIds } }).lean();
   }
 
+  async findByFieldValue(taskId, field, value, { limit = 1000 } = {}) {
+    return Result.find({ taskId, [`data.${field}`]: value })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+  }
+
   async setApiResponse(resultId, { response = null, error = null } = {}) {
     return Result.updateOne(
       { _id: resultId },

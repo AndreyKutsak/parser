@@ -86,6 +86,56 @@ exports.getRuns = async (req, res, next) => {
   }
 };
 
+/**
+ * @swagger
+ * /api/tasks/{taskId}/results/search:
+ *   get:
+ *     summary: Пошук результатів за полем та значенням
+ *     tags: [Результати]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: taskId
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: field
+ *         required: true
+ *         schema: { type: string }
+ *         description: Назва поля всередині data (напр. "price")
+ *       - in: query
+ *         name: value
+ *         required: true
+ *         schema: { type: string }
+ *         description: Значення для пошуку
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 1000 }
+ *     responses:
+ *       200:
+ *         description: Масив збігів у форматі JSON
+ *       400:
+ *         description: field або value не передано
+ */
+exports.search = async (req, res, next) => {
+  try {
+    const { field, value, limit = 1000 } = req.query;
+    if (!field || value === undefined || value === "") {
+      return res.status(400).json({ success: false, message: "field and value are required" });
+    }
+    const items = await resultRepo.findByFieldValue(
+      req.params.taskId,
+      field,
+      value,
+      { limit: Math.min(parseInt(limit) || 1000, 5000) },
+    );
+    res.json({ success: true, total: items.length, items });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.deleteResults = async (req, res, next) => {
   try {
     const { runId } = req.query;

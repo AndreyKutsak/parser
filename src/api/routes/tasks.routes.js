@@ -25,6 +25,7 @@ router.get('/:id/runs',    tasks.getRuns);
 
 // Results sub-routes
 router.get('/:taskId/results',              results.list);
+router.get('/:taskId/results/search',       results.search);
 router.get('/:taskId/results/runs',         results.getRuns);
 router.get('/:taskId/results/count',        results.count);
 router.post('/:taskId/results/forward',     results.forwardToApi);
