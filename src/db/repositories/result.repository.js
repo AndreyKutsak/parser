@@ -50,7 +50,7 @@ class ResultRepository {
       createdAtFrom,
       createdAtTo,
       page: 1,
-      limit: 10000,
+      limit: 5000,
     });
     return result.items;
   }
