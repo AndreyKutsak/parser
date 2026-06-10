@@ -13,7 +13,7 @@ const parseEvents = require("./utils/parse-events");
 const createApp = require("./server/createApp");
 
 const app = createApp();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 async function start() {
   try {
