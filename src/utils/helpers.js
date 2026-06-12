@@ -10,6 +10,13 @@ const sleep = (min = 500, max = 2000) => {
   return new Promise(resolve => setTimeout(resolve, ms));
 };
 
+const regexCache = new Map();
+const getCachedRegex = (pattern) => {
+  let re = regexCache.get(pattern);
+  if (!re) { re = new RegExp(pattern); regexCache.set(pattern, re); }
+  return re;
+};
+
 /**
  * Apply transformation rules to a scraped string value
  * Supported transforms: trim, lowercase, uppercase, number, int, boolean, regex:<pattern>:<group>
@@ -44,7 +51,7 @@ const applyTransform = (value, transforms) => {
       const pattern = parts[1];
       const group = parseInt(parts[2] ?? '0', 10);
       try {
-        const match = val.match(new RegExp(pattern));
+        const match = val.match(getCachedRegex(pattern));
         return match ? (match[group] ?? match[0]) : null;
       } catch {
         return val;

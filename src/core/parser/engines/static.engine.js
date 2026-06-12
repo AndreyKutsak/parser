@@ -8,6 +8,8 @@
  *
  * Підтримує GET і POST-запити з форматами тіла: json, form, raw.
  */
+const http = require('http');
+const https = require('https');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { HttpsProxyAgent } = require('https-proxy-agent');
@@ -15,6 +17,13 @@ const { HttpProxyAgent } = require('http-proxy-agent');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { buildHeaders } = require('../../../utils/anti-bot');
 const logger = require('../../../utils/logger');
+
+// Persistent keep-alive pools for direct (non-proxy) requests — avoids TCP+TLS handshake on every page
+const keepAliveHttpAgent  = new http.Agent ({ keepAlive: true, maxSockets: 10, maxFreeSockets: 5, timeout: 60000 });
+const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 10, maxFreeSockets: 5, timeout: 60000 });
+
+// Proxy agent cache — avoid re-creating socket-level objects on every request
+const proxyAgentCache = new Map();
 
 /**
  * Створює проксі-агент на основі конфігурації.
@@ -33,9 +42,16 @@ const buildProxyAgent = (proxy) => {
   const auth = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : '';
   const proxyUrl = `${protocol}://${auth}${host}:${port}`;
 
-  if (protocol.startsWith('socks')) return new SocksProxyAgent(proxyUrl);
-  if (protocol === 'https') return new HttpsProxyAgent(proxyUrl);
-  return new HttpProxyAgent(proxyUrl);
+  const cached = proxyAgentCache.get(proxyUrl);
+  if (cached) return cached;
+
+  let agent;
+  if (protocol.startsWith('socks')) agent = new SocksProxyAgent(proxyUrl);
+  else if (protocol === 'https') agent = new HttpsProxyAgent(proxyUrl);
+  else agent = new HttpProxyAgent(proxyUrl);
+
+  proxyAgentCache.set(proxyUrl, agent);
+  return agent;
 };
 
 /**
@@ -130,6 +146,9 @@ const fetchPage = async (url, options = {}) => {
     axiosConfig.httpsAgent = agent;
     // Force socket destruction on timeout (proxy agents ignore axios timeout)
     axiosConfig.transport = undefined;
+  } else {
+    axiosConfig.httpAgent  = keepAliveHttpAgent;
+    axiosConfig.httpsAgent = keepAliveHttpsAgent;
   }
 
   const start = Date.now();

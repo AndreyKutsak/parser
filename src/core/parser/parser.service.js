@@ -257,15 +257,19 @@ class ParserService {
         tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) => String(item[k.trim()] ?? ""));
       let crawlDone = 0; // окремий лічильник crawl-запитів
 
+      // Pre-compute task-level selectors — shared across all requests and pages
+      const taskFieldsMap = this._resolveFields(task.selectors?.fields);
+      const taskDetailFieldsMap = this._resolveFields(task.selectors?.detailFields);
+
       // ── Цикл по звичайних запитах ────────────────────────────────────────
       for (const req of baseRequests) {
         const fetchOptions = this._buildFetchOptions(task, req, proxy);
 
         // Вибираємо селектори: власні для запиту або загальні задачі
         const itemSelector = req.selectors?.item || task.selectors?.item;
-        const fields = this._resolveFields(
-          req.selectors?.fields ?? task.selectors?.fields,
-        );
+        const fields = req.selectors?.fields
+          ? this._resolveFields(req.selectors.fields)
+          : taskFieldsMap;
 
         // Стан рекурсивного обходу для цього запиту
         const crawlVisited = new Set([req.url]);
@@ -378,9 +382,7 @@ class ParserService {
               // ── Деталі: заходимо в кожне посилання ─────────────────────
               const linkSelector = task.selectors?.linkSelector;
               if (linkSelector) {
-                const detailFields = this._resolveFields(
-                  task.selectors?.detailFields,
-                );
+                const detailFields = taskDetailFieldsMap;
                 const items$ = $(itemSelector).toArray();
 
                 // Збираємо всі посилання спочатку
@@ -696,11 +698,11 @@ class ParserService {
 
           totalRecords += resultsToSave.length;
           pagesVisited++;
-          taskRepo.update(task._id, { 'stats.lastActivity': new Date() }).catch(() => {});
           currentPage += (pagination.type === "url-pattern" ? (pagination.pageStep ?? 1) : 1);
-          // Оновлюємо Run кожні 10 сторінок, щоб не навантажувати MongoDB
+          // Оновлюємо Run та lastActivity кожні 10 сторінок, щоб не навантажувати MongoDB
           if (pagesVisited % 10 === 0) {
             Run.findOneAndUpdate({ runId }, { totalRecords, totalPages: pagesVisited }).catch(() => {});
+            taskRepo.update(task._id, { 'stats.lastActivity': new Date() }).catch(() => {});
           }
 
           // Ввічлива затримка між сторінками (переривається при скасуванні)
