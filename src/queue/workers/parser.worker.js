@@ -13,7 +13,7 @@ const eventBridge = require('../../utils/event-bridge');
 const parseEvents = require('../../utils/parse-events');
 
 const STATIC_QUEUE   = 'parser';
-const DYNAMIC_QUEUE  = 'parser:dynamic';
+const DYNAMIC_QUEUE  = 'parser-dynamic';
 // Static (axios) tasks are cheap — allow higher concurrency
 const STATIC_CONCURRENCY  = parseInt(process.env.MAX_CONCURRENT_TASKS)         || 5;
 // Dynamic (Puppeteer) tasks are heavy — limit to avoid memory pressure

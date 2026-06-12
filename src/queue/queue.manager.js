@@ -12,7 +12,7 @@ try {
 }
 
 const STATIC_QUEUE  = 'parser';
-const DYNAMIC_QUEUE = 'parser:dynamic';
+const DYNAMIC_QUEUE = 'parser-dynamic';
 
 const JOB_DEFAULTS = {
   attempts:         3,
