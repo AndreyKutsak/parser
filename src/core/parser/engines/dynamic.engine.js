@@ -67,6 +67,10 @@ const launchBrowser = async (proxy = null) => {
 // Це зменшує пікове споживання пам'яті з N*400MB до ~1-2 браузери.
 const activeBrowsers = new Map();  // proxyKey → Browser
 const pendingLaunches = new Map(); // proxyKey → Promise<Browser>
+const browserLastUsed = new Map(); // proxyKey → timestamp (ms)
+
+// Browsers idle longer than this are proactively closed to free RAM.
+const BROWSER_IDLE_MS = parseInt(process.env.BROWSER_IDLE_MS) || 5 * 60 * 1000; // 5 min
 
 const _proxyKey = (proxy) =>
   proxy ? `${proxy.protocol}://${proxy.host}:${proxy.port}` : '__none__';
@@ -75,7 +79,10 @@ const _getBrowser = async (proxy) => {
   const key = _proxyKey(proxy);
 
   const existing = activeBrowsers.get(key);
-  if (existing?.isConnected()) return existing;
+  if (existing?.isConnected()) {
+    browserLastUsed.set(key, Date.now());
+    return existing;
+  }
 
   // Serialize concurrent launches for the same proxy key.
   // Without this, two parallel fetchPage calls would both see no active browser
@@ -87,7 +94,11 @@ const _getBrowser = async (proxy) => {
   const launch = launchBrowser(proxy)
     .then(browser => {
       activeBrowsers.set(key, browser);
-      browser.on('disconnected', () => activeBrowsers.delete(key));
+      browserLastUsed.set(key, Date.now());
+      browser.on('disconnected', () => {
+        activeBrowsers.delete(key);
+        browserLastUsed.delete(key);
+      });
       return browser;
     })
     .finally(() => pendingLaunches.delete(key));
@@ -96,13 +107,30 @@ const _getBrowser = async (proxy) => {
   return launch;
 };
 
+// Periodically close browsers that have been idle for BROWSER_IDLE_MS.
+const _idleCleanupInterval = setInterval(async () => {
+  const now = Date.now();
+  for (const [key, browser] of activeBrowsers) {
+    const lastUsed = browserLastUsed.get(key) ?? 0;
+    if (now - lastUsed > BROWSER_IDLE_MS) {
+      activeBrowsers.delete(key);
+      browserLastUsed.delete(key);
+      browser.close().catch(() => {});
+      logger.debug('Closed idle browser', { proxyKey: key, idleMs: now - lastUsed });
+    }
+  }
+}, 60_000);
+_idleCleanupInterval.unref(); // don't prevent process from exiting
+
 /**
  * Закриває всі активні браузери (викликати при SIGTERM воркера).
  */
 const closeAll = async () => {
+  clearInterval(_idleCleanupInterval);
   const entries = [...activeBrowsers.values()];
   activeBrowsers.clear();
   pendingLaunches.clear();
+  browserLastUsed.clear();
   await Promise.allSettled(entries.map(b => b.close()));
 };
 
@@ -246,7 +274,9 @@ const fetchPage = async (url, options = {}) => {
 
     return { $, status: response?.status() };
   } finally {
-    await page.close(); // закриваємо лише вкладку, браузер залишається живим
+    // Swallow close errors — if the browser crashed the page is already gone,
+    // and letting this throw would mask the real error from the caller.
+    await page.close().catch(e => logger.warn('page.close failed', { url, error: e.message }));
   }
 };
 

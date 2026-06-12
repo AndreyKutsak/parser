@@ -13,18 +13,16 @@ const parseEvents = require("./utils/parse-events");
 const createApp = require("./server/createApp");
 
 const app = createApp();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 async function start() {
   try {
     await connect();
     await queueManager.init();
     await eventBridge.initSubscriber(parseEvents);
-
     scheduler.start();
     await scheduler.loadFromDatabase();
     subTaskScheduler.start();
-
     app.listen(PORT, () => {
       logger.info(`Web Parser Pro running on http://localhost:${PORT}`);
       logger.info(`API docs: http://localhost:${PORT}/api-docs`);

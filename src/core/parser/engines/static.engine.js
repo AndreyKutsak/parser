@@ -133,10 +133,16 @@ const fetchPage = async (url, options = {}) => {
   }
 
   const start = Date.now();
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`Request timeout after ${timeout}ms`)), timeout + 2000)
-  );
-  const response = await Promise.race([axios(url, axiosConfig), timeoutPromise]);
+  let _backupTimer;
+  const timeoutPromise = new Promise((_, reject) => {
+    _backupTimer = setTimeout(() => reject(new Error(`Request timeout after ${timeout}ms`)), timeout + 2000);
+  });
+  let response;
+  try {
+    response = await Promise.race([axios(url, axiosConfig), timeoutPromise]);
+  } finally {
+    clearTimeout(_backupTimer);
+  }
   const duration = Date.now() - start;
 
   logger.debug('Статичний запит', { url, method, status: response.status, duration });

@@ -251,6 +251,8 @@ class ParserService {
       const crawlMaxDepth = task.options?.crawl?.maxDepth ?? 3;
       const crawlSameOrigin = task.options?.crawl?.sameOrigin !== false;
       const crawlMaxRequests = task.options?.crawl?.maxRequests ?? 0; // 0 = без ліміту
+      // Hard cap on the crawlVisited Set to prevent unbounded memory growth on large sites.
+      const crawlMaxVisited = parseInt(process.env.CRAWL_MAX_VISITED) || 50_000;
       const subst = (tpl, item) =>
         tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) => String(item[k.trim()] ?? ""));
       let crawlDone = 0; // окремий лічильник crawl-запитів
@@ -352,6 +354,7 @@ class ParserService {
                 (crawlMaxDepth === 0 || 0 < crawlMaxDepth)
               ) {
                 $(crawlSel).each((_, el) => {
+                  if (crawlVisited.size >= crawlMaxVisited) return false; // jQuery .each exit
                   const href = $(el).attr("href");
                   if (!href) return;
                   try {
@@ -367,6 +370,9 @@ class ParserService {
                     crawlQueue.push({ url: abs, depth: 1 });
                   } catch {}
                 });
+                if (crawlVisited.size >= crawlMaxVisited) {
+                  logger.warn('crawlVisited limit reached, stopping link collection', { taskId: task._id, limit: crawlMaxVisited });
+                }
               }
 
               // ── Деталі: заходимо в кожне посилання ─────────────────────
@@ -769,6 +775,7 @@ class ParserService {
                 } else {
                   // Режим селектора: збираємо href зі сторінки
                   $(crawlSel).each((_, el) => {
+                    if (crawlVisited.size >= crawlMaxVisited) return false;
                     const href = $(el).attr("href");
                     if (!href) return;
                     try {
