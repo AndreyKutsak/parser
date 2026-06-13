@@ -41,10 +41,35 @@ async function main() {
     dynamicConcurrency: DYNAMIC_CONCURRENCY,
   });
 
+  const taskCache = new Map(); // taskId → { task, expiresAt }
+  const TASK_CACHE_TTL = 30_000;
+  const TASK_CACHE_MAX = 1_000;
+
+  // Evict expired entries every 60s to prevent unbounded growth
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of taskCache) {
+      if (v.expiresAt <= now) taskCache.delete(k);
+    }
+  }, 60_000).unref();
+
+  const getCachedTask = async (taskId) => {
+    const hit = taskCache.get(taskId);
+    if (hit && hit.expiresAt > Date.now()) return hit.task;
+    const task = await taskRepo.findById(taskId);
+    if (task) {
+      if (taskCache.size >= TASK_CACHE_MAX) {
+        taskCache.delete(taskCache.keys().next().value);
+      }
+      taskCache.set(taskId, { task, expiresAt: Date.now() + TASK_CACHE_TTL });
+    }
+    return task;
+  };
+
   const jobHandler = async (job) => {
     const { taskId } = job.data;
     logger.info('Processing job', { jobId: job.id, taskId });
-    const task = await taskRepo.findById(taskId);
+    const task = await getCachedTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
     return parserService.run(task);
   };

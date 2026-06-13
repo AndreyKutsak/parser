@@ -22,8 +22,10 @@ const logger = require('../../../utils/logger');
 const keepAliveHttpAgent  = new http.Agent ({ keepAlive: true, maxSockets: 10, maxFreeSockets: 5, timeout: 60000 });
 const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 10, maxFreeSockets: 5, timeout: 60000 });
 
-// Proxy agent cache — avoid re-creating socket-level objects on every request
+// Proxy agent cache — avoid re-creating socket-level objects on every request.
+// Capped at 500 entries; oldest entry evicted when full (LRU-lite).
 const proxyAgentCache = new Map();
+const PROXY_CACHE_MAX = 500;
 
 /**
  * Створює проксі-агент на основі конфігурації.
@@ -44,6 +46,10 @@ const buildProxyAgent = (proxy) => {
 
   const cached = proxyAgentCache.get(proxyUrl);
   if (cached) return cached;
+
+  if (proxyAgentCache.size >= PROXY_CACHE_MAX) {
+    proxyAgentCache.delete(proxyAgentCache.keys().next().value);
+  }
 
   let agent;
   if (protocol.startsWith('socks')) agent = new SocksProxyAgent(proxyUrl);

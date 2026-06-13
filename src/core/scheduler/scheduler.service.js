@@ -4,6 +4,7 @@
 const cron = require('node-cron');
 const taskRepo = require('../../db/repositories/task.repository');
 const parserService = require('../parser/parser.service');
+const queueManager = require('../../queue/queue.manager');
 const logger = require('../../utils/logger');
 
 class SchedulerService {
@@ -79,9 +80,9 @@ class SchedulerService {
     }
   }
 
-  /** Trigger a task immediately (manual run) */
+  /** Trigger a task immediately (manual run) — runs directly, bypasses queue for instant response */
   async runNow(taskId) {
-    return this._executeTask(taskId);
+    return this._executeTask(taskId, { useQueue: false });
   }
 
   /** Pause a task — stops the cron job but keeps config */
@@ -155,7 +156,7 @@ class SchedulerService {
     }
   }
 
-  async _executeTask(taskId) {
+  async _executeTask(taskId, { useQueue = true } = {}) {
     const task = await taskRepo.findById(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
 
@@ -175,8 +176,12 @@ class SchedulerService {
       await taskRepo.update(taskId, { 'schedule.nextRun': nextRun });
     }
 
-    const result = await parserService.run(task);
-    return result;
+    // Scheduled tasks go through BullMQ: retries, persistence, worker isolation.
+    // runNow() bypasses queue (useQueue=false) for synchronous API response.
+    if (useQueue && queueManager.enabled) {
+      return queueManager.addJob(String(taskId), { engine: task.engine ?? 'static' });
+    }
+    return parserService.run(task);
   }
 
   _getNextCronDate(cronExpr) {

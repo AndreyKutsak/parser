@@ -262,8 +262,10 @@ class ParserService {
       const taskDetailFieldsMap = this._resolveFields(task.selectors?.detailFields);
 
       // ── Цикл по звичайних запитах ────────────────────────────────────────
-      for (const req of baseRequests) {
-        const fetchOptions = this._buildFetchOptions(task, req, proxy);
+      const REQUEST_CONCURRENCY = parseInt(process.env.REQUEST_CONCURRENCY) || 3;
+      const runBaseRequest = async (req) => {
+        let reqProxy = proxy;
+        const fetchOptions = this._buildFetchOptions(task, req, reqProxy);
 
         // Вибираємо селектори: власні для запиту або загальні задачі
         const itemSelector = req.selectors?.item || task.selectors?.item;
@@ -591,10 +593,10 @@ class ParserService {
               });
 
               // Помічаємо проксі як несправний при помилці
-              if (proxy && task.proxy?.rotate) {
-                await proxyManager.recordFailure(proxy._id);
-                proxy = await proxyManager.getNextProxy();
-                fetchOptions.proxy = proxy;
+              if (reqProxy && task.proxy?.rotate) {
+                await proxyManager.recordFailure(reqProxy._id);
+                reqProxy = await proxyManager.getNextProxy();
+                fetchOptions.proxy = reqProxy;
               }
 
               if (attempt < retries) {
@@ -727,7 +729,7 @@ class ParserService {
                     }
                   : task,
                 { ...req, url: crawlUrl, body: null, method: "GET" },
-                proxy,
+                reqProxy,
               );
               const { $ } = await engine.fetchPage(crawlUrl, crawlFetchOpts);
               // JSON crawl: auto-extract all fields from virtual HTML spans
@@ -841,11 +843,17 @@ class ParserService {
           }
         }
 
-        // Затримка між окремими запитами зі списку
-        if (baseRequests.indexOf(req) < baseRequests.length - 1) {
-          await cancellableSleep(task._id, delay, delay * 2);
-        }
-      }
+      };
+
+      const reqQueue = [...baseRequests];
+      await Promise.all(
+        Array.from({ length: Math.min(REQUEST_CONCURRENCY, Math.max(1, reqQueue.length)) }, async () => {
+          while (reqQueue.length > 0) {
+            const req = reqQueue.shift();
+            if (req) await runBaseRequest(req);
+          }
+        })
+      );
 
       // ── Шаблонні запити: підставляємо поля зі зібраних результатів ────────
       if (templateRequests.length) {

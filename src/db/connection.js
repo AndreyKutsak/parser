@@ -16,18 +16,28 @@ const connect = async () => {
     logger.info('MongoDB connected', { uri: uri.replace(/\/\/.*@/, '//***@') });
   });
 
+  mongoose.connection.on('reconnected', () => {
+    isConnected = true;
+    logger.info('MongoDB reconnected');
+  });
+
   mongoose.connection.on('error', (err) => {
     logger.error('MongoDB connection error', { error: err.message });
   });
 
   mongoose.connection.on('disconnected', () => {
     isConnected = false;
-    logger.warn('MongoDB disconnected');
+    logger.warn('MongoDB disconnected — Mongoose will retry automatically');
   });
 
   await mongoose.connect(uri, {
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
+    serverSelectionTimeoutMS: 5_000,   // fail fast if no server found
+    connectTimeoutMS:         10_000,  // initial TCP connect timeout
+    socketTimeoutMS:          45_000,  // max time to wait for a response
+    heartbeatFrequencyMS:     10_000,  // detect disconnects in ≤10s (default: 10s, explicit)
+    retryWrites:              true,    // auto-retry transient write failures
+    maxIdleTimeMS:            60_000,  // close idle connections after 1 min
+    autoIndex:                false,   // never rebuild indexes in production
   });
 };
 
