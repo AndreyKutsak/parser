@@ -180,6 +180,13 @@
           </svg>
           Авторизації
         </div>
+        <div class="nav-item" data-page="api">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
+          </svg>
+          API
+        </div>
       </div>
 
       <div class="sidebar-footer">
@@ -699,6 +706,130 @@
             </div>
           </div>
         </div>
+
+        <!-- ══════════════════════════════════════════════════════════════════
+         API ТЕСТЕР
+    ═══════════════════════════════════════════════════════════════════ -->
+        <div id="page-api" class="page hidden">
+          <div class="flex-gap" style="margin-bottom:20px">
+            <div>
+              <div class="section-title">API Доступу до даних</div>
+              <p class="section-sub">Отримуйте спарсені результати через HTTP — у скриптах, Postman або cURL</p>
+            </div>
+          </div>
+
+          <!-- Token -->
+          <div class="card" style="margin-bottom:16px;padding:14px 18px">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:600;white-space:nowrap">Bearer токен:</span>
+              <code id="api-token-display" style="flex:1;font-size:12px;background:var(--bg-2);padding:6px 10px;border-radius:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--text-2)">—</code>
+              <button class="btn btn-ghost btn-sm" onclick="copyApiToken()">Копіювати токен</button>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="tabs" style="margin-bottom:0" id="api-tabs">
+            <div class="tab active" data-apitab="task">По задачі</div>
+            <div class="tab" data-apitab="domain">По домену</div>
+          </div>
+
+          <!-- Task panel -->
+          <div id="api-panel-task" class="card" style="border-top-left-radius:0;margin-bottom:0;padding:18px;display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <div style="flex:1;min-width:200px">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Задача</label>
+                <select id="api-task-sel" class="form-control"><option value="">— оберіть задачу —</option></select>
+              </div>
+              <div style="flex:0 0 110px">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Формат</label>
+                <select id="api-task-format" class="form-control">
+                  <option value="json">JSON</option>
+                  <option value="csv">CSV</option>
+                  <option value="excel">Excel</option>
+                  <option value="txt">TXT</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <span style="font-size:12px;font-weight:600">Фільтр за датою:</span>
+                <span style="display:flex;gap:4px">
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('today','task')">Сьогодні</button>
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('week','task')">7 днів</button>
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('month','task')">30 днів</button>
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('clear','task')">✕</button>
+                </span>
+              </div>
+              <div style="display:flex;gap:10px">
+                <label style="flex:1;font-size:12px">Від<input type="date" id="api-task-from" class="form-control"/></label>
+                <label style="flex:1;font-size:12px">До<input type="date" id="api-task-to" class="form-control"/></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Domain panel -->
+          <div id="api-panel-domain" class="card hidden" style="border-top-left-radius:0;margin-bottom:0;padding:18px;display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <div style="flex:1;min-width:200px">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Домен</label>
+                <select id="api-domain-sel" class="form-control"><option value="">— оберіть домен —</option></select>
+              </div>
+              <div style="flex:0 0 110px">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Формат</label>
+                <select id="api-domain-format" class="form-control">
+                  <option value="json">JSON</option>
+                  <option value="csv">CSV</option>
+                  <option value="excel">Excel</option>
+                  <option value="txt">TXT</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <span style="font-size:12px;font-weight:600">Фільтр за датою:</span>
+                <span style="display:flex;gap:4px">
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('today','domain')">Сьогодні</button>
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('week','domain')">7 днів</button>
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('month','domain')">30 днів</button>
+                  <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="apiSetPeriod('clear','domain')">✕</button>
+                </span>
+              </div>
+              <div style="display:flex;gap:10px">
+                <label style="flex:1;font-size:12px">Від<input type="date" id="api-domain-from" class="form-control"/></label>
+                <label style="flex:1;font-size:12px">До<input type="date" id="api-domain-to" class="form-control"/></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- URL + actions -->
+          <div class="card" style="margin-top:16px;padding:18px;display:flex;flex-direction:column;gap:12px">
+            <div>
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">URL запиту:</label>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <code id="api-url-display" style="flex:1;font-size:12px;background:var(--bg-2);padding:8px 12px;border-radius:6px;word-break:break-all;min-height:36px;display:block;color:var(--text-1)">—</code>
+                <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="copyApiUrl()">Копіювати</button>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">cURL:</label>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <code id="api-curl-display" style="flex:1;font-size:11px;background:var(--bg-2);padding:8px 12px;border-radius:6px;word-break:break-all;white-space:pre-wrap;min-height:36px;display:block;color:var(--text-2)">—</code>
+                <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="copyApiCurl()">Копіювати</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="runApiTest()" id="btn-api-run">▶ Виконати (JSON)</button>
+              <button class="btn btn-success" onclick="runApiDownload()" id="btn-api-download">⬇ Завантажити файл</button>
+            </div>
+            <div id="api-result-wrap" style="display:none">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <span id="api-result-info" style="font-size:12px;color:var(--text-2);font-weight:600"></span>
+              </div>
+              <pre id="api-result-pre" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;overflow:auto;max-height:420px;margin:0;white-space:pre-wrap"></pre>
+            </div>
+          </div>
+        </div>
+
       </div>
       <!-- /content -->
     </div>

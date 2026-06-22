@@ -155,6 +155,7 @@ const navigate = (page) => {
     results: loadResults,
     monitor: loadMonitor,
     "site-auths": loadSiteAuths,
+    api: loadApiPage,
   };
   loaders[page]?.();
 };
@@ -2845,6 +2846,160 @@ const escHtml = (str) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+// ── API Tester ────────────────────────────────────────────────────────────
+const loadApiPage = async () => {
+  const tok = API.getToken() || "";
+  const el = document.getElementById("api-token-display");
+  if (el) el.textContent = tok ? tok.slice(0, 24) + "…" : "—";
+
+  try {
+    const { tasks } = await API.tasks.list({ limit: 500 });
+    const sel = document.getElementById("api-task-sel");
+    if (sel) {
+      sel.innerHTML = '<option value="">— оберіть задачу —</option>' +
+        tasks.map((t) => `<option value="${escHtml(String(t._id))}">${escHtml(t.name)}</option>`).join("");
+      sel.addEventListener("change", buildApiUrl);
+    }
+  } catch {}
+
+  try {
+    const { domains } = await API.results.getDomains();
+    const sel = document.getElementById("api-domain-sel");
+    if (sel) {
+      sel.innerHTML = '<option value="">— оберіть домен —</option>' +
+        domains.map((d) => `<option value="${escHtml(d.domain)}">${escHtml(d.domain)} (${d.taskCount})</option>`).join("");
+      sel.addEventListener("change", buildApiUrl);
+    }
+  } catch {}
+
+  ["api-task-format","api-domain-format","api-task-from","api-task-to","api-domain-from","api-domain-to"]
+    .forEach((id) => document.getElementById(id)?.addEventListener("change", buildApiUrl));
+
+  buildApiUrl();
+};
+
+const _apiActiveTab = () =>
+  document.querySelector("#api-tabs .tab.active")?.dataset.apitab || "task";
+
+const buildApiUrl = () => {
+  const tab = _apiActiveTab();
+  let path = "";
+
+  if (tab === "task") {
+    const taskId = document.getElementById("api-task-sel")?.value;
+    const fmt = document.getElementById("api-task-format")?.value || "json";
+    const from = document.getElementById("api-task-from")?.value;
+    const to = document.getElementById("api-task-to")?.value;
+    if (taskId) {
+      const p = new URLSearchParams();
+      if (from) p.set("filterFrom", from);
+      if (to) p.set("filterTo", to);
+      const qs = p.toString() ? "?" + p.toString() : "";
+      path = `/api/tasks/${taskId}/export/${fmt}${qs}`;
+    }
+  } else {
+    const domain = document.getElementById("api-domain-sel")?.value;
+    const fmt = document.getElementById("api-domain-format")?.value || "json";
+    const from = document.getElementById("api-domain-from")?.value;
+    const to = document.getElementById("api-domain-to")?.value;
+    if (domain) {
+      const p = new URLSearchParams({ domain, format: fmt });
+      if (from) p.set("filterFrom", from);
+      if (to) p.set("filterTo", to);
+      path = `/api/export/domain?${p}`;
+    }
+  }
+
+  const absUrl = path ? `${window.location.origin}${path}` : "—";
+  const token = API.getToken() || "<TOKEN>";
+  const curl = path
+    ? `curl -H "Authorization: Bearer ${token}" \\\n  "${absUrl}"`
+    : "—";
+
+  const urlEl = document.getElementById("api-url-display");
+  const curlEl = document.getElementById("api-curl-display");
+  if (urlEl) urlEl.textContent = absUrl;
+  if (curlEl) curlEl.textContent = curl;
+  const wrap = document.getElementById("api-result-wrap");
+  if (wrap) wrap.style.display = "none";
+};
+
+const runApiTest = async () => {
+  const absUrl = document.getElementById("api-url-display")?.textContent;
+  if (!absUrl || absUrl === "—") return UI.toast("Оберіть задачу або домен", "error");
+
+  const tab = _apiActiveTab();
+  const fmt = document.getElementById(tab === "task" ? "api-task-format" : "api-domain-format")?.value;
+  if (fmt !== "json") {
+    UI.toast("Перегляд доступний лише для JSON — для інших форматів натисніть «Завантажити»", "info");
+    return;
+  }
+
+  const btn = document.getElementById("btn-api-run");
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Виконую…"; }
+    const resp = await fetch(absUrl, { headers: { Authorization: `Bearer ${API.getToken() || ""}` } });
+    const data = await resp.json();
+    const wrap = document.getElementById("api-result-wrap");
+    const pre = document.getElementById("api-result-pre");
+    const info = document.getElementById("api-result-info");
+    const cnt = Array.isArray(data) ? data.length : null;
+    if (info) info.textContent = cnt !== null ? `${cnt} записів` : (resp.ok ? "OK" : `Помилка ${resp.status}`);
+    if (pre) pre.textContent = JSON.stringify(data, null, 2).slice(0, 100000);
+    if (wrap) wrap.style.display = "block";
+  } catch (e) {
+    UI.toast("Помилка: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "▶ Виконати (JSON)"; }
+  }
+};
+
+const runApiDownload = async () => {
+  const absUrl = document.getElementById("api-url-display")?.textContent;
+  if (!absUrl || absUrl === "—") return UI.toast("Оберіть задачу або домен", "error");
+  try {
+    UI.toast("Генерую файл…", "info");
+    const resp = await fetch(absUrl, { headers: { Authorization: `Bearer ${API.getToken() || ""}` } });
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.message || `HTTP ${resp.status}`); }
+    const blob = await resp.blob();
+    const cd = resp.headers.get("Content-Disposition") || "";
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/) || cd.match(/filename="([^"]+)"/);
+    const filename = m ? decodeURIComponent(m[1]) : "export";
+    const url = URL.createObjectURL(blob);
+    Object.assign(document.createElement("a"), { href: url, download: filename }).click();
+    URL.revokeObjectURL(url);
+  } catch (e) { UI.toast(e.message, "error"); }
+};
+
+const copyApiToken = () =>
+  navigator.clipboard.writeText(API.getToken() || "")
+    .then(() => UI.toast("Токен скопійовано", "success"));
+
+const copyApiUrl = () => {
+  const t = document.getElementById("api-url-display")?.textContent;
+  if (t && t !== "—") navigator.clipboard.writeText(t).then(() => UI.toast("URL скопійовано", "success"));
+};
+
+const copyApiCurl = () => {
+  const t = document.getElementById("api-curl-display")?.textContent;
+  if (t && t !== "—") navigator.clipboard.writeText(t).then(() => UI.toast("cURL скопійовано", "success"));
+};
+
+const apiSetPeriod = (preset, type) => {
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const fromEl = document.getElementById(`api-${type}-from`);
+  const toEl = document.getElementById(`api-${type}-to`);
+  if (!fromEl || !toEl) return;
+  if (preset === "clear") { fromEl.value = ""; toEl.value = ""; }
+  else {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (preset === "today") { fromEl.value = fmt(today); toEl.value = fmt(today); }
+    else if (preset === "week") { const f = new Date(today); f.setDate(f.getDate() - 6); fromEl.value = fmt(f); toEl.value = fmt(today); }
+    else if (preset === "month") { const f = new Date(today); f.setDate(f.getDate() - 29); fromEl.value = fmt(f); toEl.value = fmt(today); }
+  }
+  buildApiUrl();
+};
+
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
   // Selector panel
@@ -2866,6 +3021,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Nav
   document.querySelectorAll("[data-page]").forEach((el) => {
     el.addEventListener("click", () => navigate(el.dataset.page));
+  });
+
+  // API tester tabs
+  document.querySelectorAll("#api-tabs .tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll("#api-tabs .tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      const t = tab.dataset.apitab;
+      document.getElementById("api-panel-task").classList.toggle("hidden", t !== "task");
+      document.getElementById("api-panel-domain").classList.toggle("hidden", t !== "domain");
+      buildApiUrl();
+    });
   });
 
   // Task modal
