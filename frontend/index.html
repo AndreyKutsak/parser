@@ -173,6 +173,13 @@
           </svg>
           Проксі
         </div>
+        <div class="nav-item" data-page="site-auths">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" />
+            <path d="M7 11V7a5 5 0 0110 0v4" />
+          </svg>
+          Авторизації
+        </div>
       </div>
 
       <div class="sidebar-footer">
@@ -664,6 +671,33 @@
             </div>
           </div>
           <div id="proxies-pagination" class="pagination"></div>
+        </div>
+        <!-- ─── Авторизації ─────────────────────────────────────────── -->
+        <div id="page-site-auths" class="page hidden">
+          <div class="flex-gap" style="margin-bottom: 20px">
+            <div>
+              <div class="section-title">Авторизації сайтів</div>
+              <p class="section-sub">Збережені сесії для парсингу захищених ресурсів</p>
+            </div>
+            <button id="btn-new-site-auth" class="btn btn-primary ml-auto">+ Нова авторизація</button>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Назва</th>
+                    <th>URL входу</th>
+                    <th>Тип</th>
+                    <th>Статус</th>
+                    <th>Оновлено</th>
+                    <th>Дії</th>
+                  </tr>
+                </thead>
+                <tbody id="site-auths-tbody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
       <!-- /content -->
@@ -1390,6 +1424,15 @@
               </div>
             </div>
 
+            <!-- Site auth -->
+            <div class="form-group">
+              <label class="form-label">Авторизація сайту</label>
+              <select id="tf-site-auth" class="form-control">
+                <option value="">— Без авторизації —</option>
+              </select>
+              <p class="form-hint">Cookies з вибраної авторизації автоматично додаються до запитів</p>
+            </div>
+
             <div class="form-group">
               <label
                 style="
@@ -1871,6 +1914,7 @@
               results: "Результати",
               proxies: "Проксі",
               monitor: "Черга задач",
+              "site-auths": "Авторизації",
             };
             document.getElementById("topbar-title").textContent =
               titles[el.dataset.page] || "";
@@ -2150,6 +2194,103 @@
           <button class="btn btn-success" id="btn-do-export-txt">
             ⬇ Завантажити TXT
           </button>
+        </div>
+      </div>
+    </div>
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО АВТОРИЗАЦІЇ САЙТУ
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="site-auth-modal">
+      <div class="modal" style="max-width: 640px">
+        <div class="modal-header">
+          <span id="site-auth-modal-title">Нова авторизація</span>
+          <button class="btn-close" id="btn-close-site-auth-modal">×</button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Назва *</label>
+              <input id="sa-name" class="form-control" placeholder="напр. my-site.com" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Тип</label>
+              <select id="sa-type" class="form-control">
+                <option value="form">Авто (форма)</option>
+                <option value="manual">Ручні cookie</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">URL сторінки входу *</label>
+            <input id="sa-login-url" type="url" class="form-control" placeholder="https://site.com/login" />
+          </div>
+
+          <!-- Form auth config -->
+          <div id="sa-form-config">
+            <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--text-2)">Налаштування форми</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Логін (CSS)</label>
+                <input id="sa-username-sel" class="form-control" placeholder="input[name=username]" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Логін (значення)</label>
+                <input id="sa-username-val" class="form-control" placeholder="мій@email.com" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Пароль (CSS)</label>
+                <input id="sa-password-sel" class="form-control" placeholder="input[name=password]" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Пароль (значення)</label>
+                <input id="sa-password-val" type="password" class="form-control" placeholder="••••••••" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Кнопка відправки (CSS)</label>
+                <input id="sa-submit-sel" class="form-control" placeholder="button[type=submit]" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Індикатор успіху (CSS)</label>
+                <input id="sa-success-sel" class="form-control" placeholder=".user-menu, #logout-btn" />
+                <p class="form-hint">Елемент, що з'являється після входу</p>
+              </div>
+            </div>
+
+            <!-- Extra fields -->
+            <div style="margin-top:8px">
+              <div class="flex-gap" style="margin-bottom:6px;align-items:center">
+                <span style="font-size:13px;font-weight:600">Додаткові поля форми</span>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-add-sa-extra-field">+ Додати</button>
+              </div>
+              <div id="sa-extra-fields-container"></div>
+              <p class="form-hint">Наприклад: поля CSRF-токену, captcha, remember-me тощо</p>
+            </div>
+          </div>
+
+          <!-- Manual cookie -->
+          <div id="sa-manual-config" style="display:none">
+            <div class="form-group">
+              <label class="form-label">Cookie рядок</label>
+              <textarea id="sa-cookies-manual" class="form-control" rows="4"
+                placeholder="session=abc123; csrf=xyz; другий_cookie=value"></textarea>
+              <p class="form-hint">Скопіюйте з DevTools → Application → Cookies → скопіюйте як рядок</p>
+            </div>
+          </div>
+
+          <!-- Status display -->
+          <div id="sa-status-row" style="display:none;padding:8px 12px;border-radius:6px;font-size:13px;background:var(--bg-2)">
+            <span id="sa-status-text"></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="btn-cancel-site-auth-modal">Скасувати</button>
+          <button class="btn btn-primary" id="btn-save-site-auth">Зберегти</button>
         </div>
       </div>
     </div>

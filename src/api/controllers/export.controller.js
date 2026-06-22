@@ -248,6 +248,31 @@ exports.txt = async (req, res, next) => {
   }
 };
 
+/**
+ * @swagger
+ * /api/export/domains:
+ *   get:
+ *     summary: Список доменів з кількістю задач
+ *     tags: [Експорт]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Масив доменів
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 domains:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       domain: { type: string, example: "example.com" }
+ *                       taskCount: { type: integer, example: 3 }
+ */
 exports.domains = async (req, res, next) => {
   try {
     const domains = await taskRepo.getAllDomains();
@@ -255,6 +280,31 @@ exports.domains = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * @swagger
+ * /api/export/domain/fields:
+ *   get:
+ *     summary: Поля результатів для вказаного домену
+ *     tags: [Експорт]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: domain
+ *         required: true
+ *         schema: { type: string }
+ *         description: Домен (наприклад, example.com)
+ *     responses:
+ *       200:
+ *         description: Список полів
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 fields: { type: array, items: { type: string } }
+ */
 exports.domainFields = async (req, res, next) => {
   try {
     const { domain } = req.query;
@@ -271,6 +321,69 @@ exports.domainFields = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * @swagger
+ * /api/export/domain:
+ *   get:
+ *     summary: Експортувати всі результати по домену
+ *     tags: [Експорт]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: domain
+ *         required: true
+ *         schema: { type: string }
+ *         description: Домен (наприклад, example.com)
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, csv, excel, txt], default: json }
+ *         description: Формат вивантаження
+ *       - in: query
+ *         name: filterFrom
+ *         schema: { type: string, format: date }
+ *         description: Дата початку фільтру (YYYY-MM-DD)
+ *       - in: query
+ *         name: filterTo
+ *         schema: { type: string, format: date }
+ *         description: Дата кінця фільтру (YYYY-MM-DD)
+ *       - in: query
+ *         name: fields
+ *         schema: { type: array, items: { type: string } }
+ *         style: form
+ *         explode: true
+ *         description: Поля для включення у вивантаження
+ *       - in: query
+ *         name: uniqueField
+ *         schema: { type: string }
+ *         description: Поле для дедуплікації
+ *       - in: query
+ *         name: mode
+ *         schema: { type: string, enum: [delta] }
+ *         description: delta — розрахунок змін між знімками
+ *       - in: query
+ *         name: dateFrom
+ *         schema: { type: string, format: date }
+ *         description: Початок delta-діапазону (YYYY-MM-DD)
+ *       - in: query
+ *         name: dateTo
+ *         schema: { type: string, format: date }
+ *         description: Кінець delta-діапазону (YYYY-MM-DD)
+ *     responses:
+ *       200:
+ *         description: Файл вивантаження (JSON / CSV / Excel / TXT)
+ *         content:
+ *           application/json:
+ *             schema: { type: array, items: { type: object } }
+ *           text/csv:
+ *             schema: { type: string }
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema: { type: string, format: binary }
+ *           text/plain:
+ *             schema: { type: string }
+ *       400:
+ *         description: Не вказано domain
+ */
 exports.byDomain = async (req, res, next) => {
   try {
     const domain = req.query.domain;

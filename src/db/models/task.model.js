@@ -246,6 +246,8 @@ const taskSchema = new mongoose.Schema(
 
     tags: [{ type: String }],
 
+    siteAuth: { type: mongoose.Schema.Types.ObjectId, ref: 'SiteAuth', default: null },
+
     /**
      * Sub-task configuration — controls whether item URLs discovered during
      * this task's run should spawn recurring sub-tasks.

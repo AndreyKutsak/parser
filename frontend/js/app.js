@@ -154,6 +154,7 @@ const navigate = (page) => {
     proxies: loadProxies,
     results: loadResults,
     monitor: loadMonitor,
+    "site-auths": loadSiteAuths,
   };
   loaders[page]?.();
 };
@@ -700,6 +701,10 @@ const openTaskModal = (task = null) => {
     if (headersTextarea) headersTextarea.value = notifHeadersStr;
   }
 
+  // Site auth dropdown
+  const siteAuthId = typeof task?.siteAuth === 'object' ? task?.siteAuth?._id : task?.siteAuth;
+  populateSiteAuthDropdown(siteAuthId || null);
+
   // Load fields
   const fieldsMap = task?.selectors?.fields || {};
   state.fields = Object.entries(fieldsMap).map(([name, cfg]) => ({
@@ -1218,6 +1223,7 @@ const saveTask = async () => {
     },
     requests: requestsList,
     proxy: { enabled: gc("tf-proxy-enabled"), rotate: true },
+    siteAuth: g("tf-site-auth") || null,
     subTasks: {
       enabled: gc("tf-subtasks-enabled"),
       intervalMinutes: parseInt(g("tf-subtasks-interval")) || 60,
@@ -1555,6 +1561,19 @@ const getExportParams = () => {
   return params;
 };
 
+const deSetPeriod = (preset) => {
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const from = document.getElementById("de-filter-from");
+  const to = document.getElementById("de-filter-to");
+  if (!from || !to) return;
+  if (preset === "clear") { from.value = ""; to.value = ""; return; }
+  const now = new Date();
+  const toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (preset === "today") { from.value = fmt(toDate); to.value = fmt(toDate); }
+  else if (preset === "week") { const f = new Date(toDate); f.setDate(f.getDate() - 6); from.value = fmt(f); to.value = fmt(toDate); }
+  else if (preset === "month") { const f = new Date(toDate); f.setDate(f.getDate() - 29); from.value = fmt(f); to.value = fmt(toDate); }
+};
+
 const _renderDomainFieldRows = (fields, savedTypes = {}, savedAggr = [], savedUnique = null) => {
   const uniqueOpts = `<option value="">— не вибрано —</option>` +
     fields.map((f) => `<option value="${escHtml(f)}" ${savedUnique === f ? "selected" : ""}>${escHtml(f)}</option>`).join("");
@@ -1609,7 +1628,15 @@ const openDomainExportModal = async () => {
           </div>
           <div id="de-fields-list"></div>
           <hr style="margin:12px 0"/>
-          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Фільтр за часом:</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:600">Фільтр за часом:</span>
+            <span style="display:flex;gap:4px">
+              <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="deSetPeriod('today')">Сьогодні</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="deSetPeriod('week')">7 днів</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="deSetPeriod('month')">30 днів</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="deSetPeriod('clear')">✕</button>
+            </span>
+          </div>
           <div style="display:flex;gap:10px;margin-bottom:4px">
             <label style="flex:1;font-size:12px">Від<input type="date" id="de-filter-from" class="form-control"/></label>
             <label style="flex:1;font-size:12px">До<input type="date" id="de-filter-to" class="form-control"/></label>
@@ -2618,6 +2645,197 @@ const initTabs = () => {
   });
 };
 
+// ── Site Auths ────────────────────────────────────────────────────────────
+
+let _siteAuths = []; // cached list for dropdowns
+let _editingSiteAuth = null;
+let _saExtraFields = []; // extra form fields list
+
+const loadSiteAuths = async () => {
+  try {
+    const { items } = await API.siteAuths.list();
+    _siteAuths = items || [];
+    renderSiteAuthsTable();
+  } catch (err) {
+    UI.toast("Помилка завантаження авторизацій: " + err.message, "error");
+  }
+};
+
+const renderSiteAuthsTable = () => {
+  const statusLabel = { pending: "Очікує", active: "Активна", error: "Помилка" };
+  const statusClass = { pending: "badge-idle", active: "badge-running", error: "badge-error" };
+  const typeLabel = { form: "Авто (форма)", manual: "Ручні cookie" };
+
+  const rows = _siteAuths.map((a) => `
+    <tr>
+      <td><strong>${escHtml(a.name)}</strong></td>
+      <td style="font-size:12px;color:var(--text-2)">${escHtml(a.loginUrl)}</td>
+      <td>${escHtml(typeLabel[a.type] || a.type)}</td>
+      <td><span class="badge ${statusClass[a.status] || 'badge-idle'}">${statusLabel[a.status] || a.status}</span></td>
+      <td style="font-size:12px">${a.cookiesUpdatedAt ? UI.fmtDate(a.cookiesUpdatedAt) : "—"}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-xs btn-ghost" onclick="editSiteAuth('${a._id}')">Редагувати</button>
+          ${a.type === 'form' ? `<button class="btn btn-xs btn-primary" onclick="runSiteAuth('${a._id}')">↻ Авторизація</button>` : ''}
+          <button class="btn btn-xs btn-danger" onclick="deleteSiteAuth('${a._id}')">Видалити</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  UI.setHtml('site-auths-tbody', rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-2)">Авторизацій ще немає</td></tr>');
+};
+
+const openSiteAuthModal = (auth = null) => {
+  _editingSiteAuth = auth;
+  _saExtraFields = auth?.formConfig?.extraFields ? [...auth.formConfig.extraFields] : [];
+
+  document.getElementById('site-auth-modal-title').textContent = auth ? 'Редагувати авторизацію' : 'Нова авторизація';
+  document.getElementById('sa-name').value = auth?.name || '';
+  document.getElementById('sa-type').value = auth?.type || 'form';
+  document.getElementById('sa-login-url').value = auth?.loginUrl || '';
+  document.getElementById('sa-username-sel').value = auth?.formConfig?.usernameSelector || '';
+  document.getElementById('sa-username-val').value = auth?.credentials?.username || '';
+  document.getElementById('sa-password-sel').value = auth?.formConfig?.passwordSelector || '';
+  document.getElementById('sa-password-val').value = auth?.credentials?.password || '';
+  document.getElementById('sa-submit-sel').value = auth?.formConfig?.submitSelector || '';
+  document.getElementById('sa-success-sel').value = auth?.formConfig?.successSelector || '';
+  document.getElementById('sa-cookies-manual').value = auth?.cookies || '';
+
+  const statusRow = document.getElementById('sa-status-row');
+  const statusText = document.getElementById('sa-status-text');
+  if (auth?.lastError) {
+    statusRow.style.display = '';
+    statusRow.style.background = 'var(--danger, #fee2e2)';
+    statusText.textContent = 'Помилка: ' + auth.lastError;
+  } else if (auth?.cookiesUpdatedAt) {
+    statusRow.style.display = '';
+    statusRow.style.background = 'var(--bg-2)';
+    statusText.textContent = 'Cookies оновлено: ' + UI.fmtDate(auth.cookiesUpdatedAt);
+  } else {
+    statusRow.style.display = 'none';
+  }
+
+  renderSaExtraFields();
+  toggleSaTypeView();
+  document.getElementById('site-auth-modal').classList.add('open');
+};
+
+const toggleSaTypeView = () => {
+  const type = document.getElementById('sa-type').value;
+  document.getElementById('sa-form-config').style.display = type === 'form' ? '' : 'none';
+  document.getElementById('sa-manual-config').style.display = type === 'manual' ? '' : 'none';
+};
+
+const renderSaExtraFields = () => {
+  const container = document.getElementById('sa-extra-fields-container');
+  if (!container) return;
+  container.innerHTML = _saExtraFields.map((f, i) => `
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center">
+      <input class="form-control" style="font-size:13px" value="${escHtml(f.selector)}"
+        placeholder="CSS селектор" onchange="updateSaExtraField(${i},'selector',this.value)" />
+      <input class="form-control" style="font-size:13px" value="${escHtml(f.value)}"
+        placeholder="Значення" onchange="updateSaExtraField(${i},'value',this.value)" />
+      <button class="btn btn-xs btn-danger" onclick="removeSaExtraField(${i})">✕</button>
+    </div>
+  `).join('');
+};
+
+const updateSaExtraField = (i, key, val) => { _saExtraFields[i][key] = val; };
+const removeSaExtraField = (i) => { _saExtraFields.splice(i, 1); renderSaExtraFields(); };
+
+const closeSiteAuthModal = () =>
+  document.getElementById('site-auth-modal').classList.remove('open');
+
+const saveSiteAuth = async () => {
+  const name = document.getElementById('sa-name').value.trim();
+  const loginUrl = document.getElementById('sa-login-url').value.trim();
+  const type = document.getElementById('sa-type').value;
+  if (!name || !loginUrl) { UI.toast('Назва та URL обовʼязкові', 'error'); return; }
+
+  const body = {
+    name, loginUrl, type,
+    formConfig: {
+      usernameSelector: document.getElementById('sa-username-sel').value.trim() || null,
+      passwordSelector: document.getElementById('sa-password-sel').value.trim() || null,
+      submitSelector:   document.getElementById('sa-submit-sel').value.trim() || null,
+      successSelector:  document.getElementById('sa-success-sel').value.trim() || null,
+      extraFields: _saExtraFields.filter((f) => f.selector),
+    },
+    credentials: {
+      username: document.getElementById('sa-username-val').value || null,
+      password: document.getElementById('sa-password-val').value || null,
+    },
+  };
+
+  if (type === 'manual') {
+    body.cookies = document.getElementById('sa-cookies-manual').value.trim() || null;
+    if (body.cookies) { body.status = 'active'; body.cookiesUpdatedAt = new Date().toISOString(); }
+  }
+
+  const btn = document.getElementById('btn-save-site-auth');
+  UI.loading(btn, true);
+  try {
+    if (_editingSiteAuth) {
+      await API.siteAuths.update(_editingSiteAuth._id, body);
+      UI.toast('Авторизацію оновлено', 'success');
+    } else {
+      await API.siteAuths.create(body);
+      UI.toast('Авторизацію створено', 'success');
+    }
+    closeSiteAuthModal();
+    await loadSiteAuths();
+  } catch (err) {
+    UI.toast(err.message, 'error');
+  } finally {
+    UI.loading(btn, false);
+  }
+};
+
+const editSiteAuth = async (id) => {
+  const auth = _siteAuths.find((a) => a._id === id);
+  if (auth) openSiteAuthModal(auth);
+};
+
+const deleteSiteAuth = async (id) => {
+  if (!UI.confirm('Видалити авторизацію?')) return;
+  try {
+    await API.siteAuths.delete(id);
+    UI.toast('Видалено', 'success');
+    await loadSiteAuths();
+  } catch (err) {
+    UI.toast(err.message, 'error');
+  }
+};
+
+const runSiteAuth = async (id) => {
+  const btn = document.querySelector(`[onclick="runSiteAuth('${id}')"]`);
+  if (btn) UI.loading(btn, true);
+  try {
+    await API.siteAuths.authenticate(id);
+    UI.toast('Авторизацію виконано! Cookies збережено.', 'success');
+    await loadSiteAuths();
+  } catch (err) {
+    UI.toast('Помилка авторизації: ' + err.message, 'error');
+  } finally {
+    if (btn) UI.loading(btn, false);
+  }
+};
+
+// Populate site-auth dropdown in task modal
+const populateSiteAuthDropdown = async (selectedId = null) => {
+  try {
+    if (!_siteAuths.length) await loadSiteAuths();
+    const sel = document.getElementById('tf-site-auth');
+    if (!sel) return;
+    const opts = _siteAuths.map((a) =>
+      `<option value="${a._id}" ${a._id === selectedId ? 'selected' : ''}>${escHtml(a.name)} (${a.type === 'form' ? 'авто' : 'cookie'})</option>`
+    ).join('');
+    sel.innerHTML = '<option value="">— Без авторизації —</option>' + opts;
+    if (selectedId) sel.value = selectedId;
+  } catch { /* silently ignore */ }
+};
+
 // ── Utils ─────────────────────────────────────────────────────────────────
 const escHtml = (str) =>
   String(str)
@@ -2976,6 +3194,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         UI.loading(btn, false);
       }
     });
+
+  // Site auths page + modal
+  document.getElementById('btn-new-site-auth')?.addEventListener('click', () => openSiteAuthModal());
+  document.getElementById('btn-close-site-auth-modal')?.addEventListener('click', closeSiteAuthModal);
+  document.getElementById('btn-cancel-site-auth-modal')?.addEventListener('click', closeSiteAuthModal);
+  document.getElementById('btn-save-site-auth')?.addEventListener('click', saveSiteAuth);
+  document.getElementById('sa-type')?.addEventListener('change', toggleSaTypeView);
+  document.getElementById('btn-add-sa-extra-field')?.addEventListener('click', () => {
+    _saExtraFields.push({ selector: '', value: '' });
+    renderSaExtraFields();
+  });
 
   // Tabs
   initTabs();

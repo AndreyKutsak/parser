@@ -210,6 +210,27 @@ class ParserService {
       paginationEnabled: task.pagination?.enabled ?? false,
     });
 
+    // Inject site-auth cookies if configured
+    if (task.siteAuth) {
+      try {
+        const siteAuthService = require('../site-auth/site-auth.service');
+        const authCookies = await siteAuthService.getCookies(task.siteAuth);
+        if (authCookies) {
+          const existing = task.options?.cookies;
+          task = {
+            ...task,
+            options: {
+              ...task.options,
+              cookies: existing ? `${authCookies}; ${existing}` : authCookies,
+            },
+          };
+          logger.debug('Injected site-auth cookies', { taskId: task._id, authId: task.siteAuth });
+        }
+      } catch (err) {
+        logger.warn('Failed to load site-auth cookies', { taskId: task._id, error: err.message });
+      }
+    }
+
     try {
       // Визначаємо проксі для першого запиту
       let proxy = null;

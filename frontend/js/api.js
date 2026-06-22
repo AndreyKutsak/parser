@@ -196,6 +196,16 @@ const API = (() => {
     stats: () => request("GET", "/proxies/stats"),
   };
 
+  // ── Site Auths ────────────────────────────────────────────────────
+  const siteAuths = {
+    list: () => request("GET", "/site-auths"),
+    create: (b) => request("POST", "/site-auths", b),
+    update: (id, b) => request("PUT", `/site-auths/${id}`, b),
+    delete: (id) => request("DELETE", `/site-auths/${id}`),
+    authenticate: (id) => request("POST", `/site-auths/${id}/authenticate`),
+    setCookies: (id, cookies) => request("PUT", `/site-auths/${id}/cookies`, { cookies }),
+  };
+
   return {
     auth,
     tasks,
@@ -204,6 +214,7 @@ const API = (() => {
     subtasks,
     monitor,
     analytics: analyticsApi,
+    siteAuths,
     getToken,
     setToken: (t) => localStorage.setItem("token", t),
     clearToken: () => localStorage.removeItem("token"),
