@@ -15,7 +15,10 @@
  */
 const crypto = require("crypto");
 const axios = require("axios");
+const { resolveJsonPath, pathToKey, applyJsonFormat } = require('../../utils/json-utils');
+
 const cancelledTasks = new Set(); // taskId → зупинити між сторінками
+const PAGE_LOG_MAX = 50;
 
 // Lazy-load to avoid circular dependency
 const getSubTaskService = () => require("../subtask/subtask.service");
@@ -70,6 +73,47 @@ const trackFieldChanges = (task, newData, oldData) => {
 };
 
 // Return a lean preview of a data object (first N key-value pairs, values truncated)
+const subst = (tpl, item) =>
+  tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) => String(item[k.trim()] ?? ''));
+
+// Оцінює одне правило над значенням поля
+const _testOperator = (strVal, op, ruleVal) => {
+  switch (op) {
+    case 'contains':     return strVal.includes(ruleVal);
+    case 'not_contains': return !strVal.includes(ruleVal);
+    case 'equals':       return strVal === ruleVal;
+    case 'not_equals':   return strVal !== ruleVal;
+    case 'starts_with':  return strVal.startsWith(ruleVal);
+    case 'ends_with':    return strVal.endsWith(ruleVal);
+    case 'regex':        try { return new RegExp(ruleVal, 'i').test(strVal); } catch { return false; }
+    case 'empty':        return strVal.trim() === '';
+    case 'not_empty':    return strVal.trim() !== '';
+    case 'gt':           return parseFloat(strVal.replace(/[^\d.-]/g, '')) > parseFloat(ruleVal);
+    case 'lt':           return parseFloat(strVal.replace(/[^\d.-]/g, '')) < parseFloat(ruleVal);
+    default:             return false;
+  }
+};
+
+// Застосовує правила до запису. Повертає null якщо запис треба пропустити.
+// Копія об'єкту створюється лише коли реально спрацьовує set_field.
+const _applyRules = (record, rules) => {
+  if (!rules?.length) return record;
+  let result = null; // lazy — копіюємо тільки при першій зміні
+  for (const rule of rules) {
+    if (!rule.field || !rule.operator) continue;
+    const src    = result ?? record;
+    const strVal = src[rule.field] == null ? '' : String(src[rule.field]);
+    if (!_testOperator(strVal, rule.operator, rule.value || '')) continue;
+    if (rule.action === 'skip') return null;
+    if (rule.action === 'set_field' && rule.targetField) {
+      if (!result) result = { ...record };
+      result[rule.targetField] = rule.targetValue ?? '';
+    }
+  }
+  return result ?? record;
+};
+
+
 const dataPreview = (obj, n = 4) => {
   if (!obj || typeof obj !== "object") return {};
   return Object.fromEntries(
@@ -274,8 +318,6 @@ class ParserService {
       const crawlMaxRequests = task.options?.crawl?.maxRequests ?? 0; // 0 = без ліміту
       // Hard cap on the crawlVisited Set to prevent unbounded memory growth on large sites.
       const crawlMaxVisited = parseInt(process.env.CRAWL_MAX_VISITED) || 50_000;
-      const subst = (tpl, item) =>
-        tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) => String(item[k.trim()] ?? ""));
       let crawlDone = 0; // окремий лічильник crawl-запитів
 
       // Pre-compute task-level selectors — shared across all requests and pages
@@ -341,7 +383,7 @@ class ParserService {
           // ── Цикл повторних спроб ────────────────────────────────────────
           for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-              let { $, status } = await engine.fetchPage(
+              let { $, status, rawJsonItems } = await engine.fetchPage(
                 currentUrl,
                 fetchOptions,
               );
@@ -358,7 +400,7 @@ class ParserService {
                   url: currentUrl,
                   status,
                 });
-                if (pageLog.length < 50) pageLog.push({
+                if (pageLog.length < PAGE_LOG_MAX) pageLog.push({
                   url: currentUrl,
                   page: currentPage,
                   method: req.method,
@@ -371,7 +413,12 @@ class ParserService {
                 break;
               }
 
-              pageRecords = extractAll($, itemSelector, fields, currentUrl);
+              // Прямий JSON-режим: немає itemSelector, але є rawJsonItems з engine
+              if (rawJsonItems && !itemSelector) {
+                pageRecords = this._extractJsonRecords(rawJsonItems, fields);
+              } else {
+                pageRecords = extractAll($, itemSelector, fields, currentUrl);
+              }
               detailUrls = new Array(pageRecords.length).fill(null); // reset each attempt
 
               // ── Crawl: збираємо посилання для рекурсивного обходу ──────
@@ -498,6 +545,44 @@ class ParserService {
                 }
               }
 
+              // ── Follow-fields: рекурсивно проходимо посилання та merge-уємо дані ──
+              // Runs AFTER detail pages so detail field values are available in subst()
+              const hasFollowFields = [...fields.values()].some(
+                (cfg) =>
+                  cfg.type === 'лінк на іншу сторінку' &&
+                  cfg.follow !== false &&
+                  (cfg.urlTemplate || (cfg.subSelectors && Object.keys(cfg.subSelectors).length > 0)),
+              );
+              logger.debug('[FOLLOW] hasFollowFields=%s records=%d fieldTypes=%j', hasFollowFields, pageRecords.length,
+                [...fields.entries()].map(([k, v]) => ({ k, type: v.type, follow: v.follow, hasSub: !!v.subSelectors && Object.keys(v.subSelectors || {}).length > 0 })));
+              if (hasFollowFields && pageRecords.length) {
+                const followConcurrency = task.options?.detailConcurrency ?? 3;
+                const followBatches = chunk(
+                  pageRecords.map((rec, idx) => ({ rec, idx })),
+                  followConcurrency,
+                );
+                for (let fbi = 0; fbi < followBatches.length; fbi++) {
+                  if (cancelledTasks.has(String(task._id))) break;
+                  await Promise.all(
+                    followBatches[fbi].map(({ rec, idx }) =>
+                      this._followFields(rec, fields, currentUrl, {
+                        engine,
+                        staticEngine,
+                        fetchOptions,
+                        taskId: task._id,
+                        followDelay: task.options?.followDelay ?? 0,
+                        runId,
+                        idx,
+                        emit,
+                      }),
+                    ),
+                  );
+                  if (fbi < followBatches.length - 1) {
+                    await cancellableSleep(task._id, delay, delay * 2);
+                  }
+                }
+              }
+
               // ── Crawl: URL-шаблон з полів кожного запису ───────────────
               // Runs AFTER detail pages so {{detailField}} values are available
               if (crawlEnabled && crawlUrlTemplate && pageRecords.length) {
@@ -533,7 +618,7 @@ class ParserService {
                 records: pageRecords.length,
               });
 
-              if (pageLog.length < 50) pageLog.push({
+              if (pageLog.length < PAGE_LOG_MAX) pageLog.push({
                 url: currentUrl,
                 page: currentPage,
                 method: req.method,
@@ -635,7 +720,7 @@ class ParserService {
               page: currentPage,
               error: lastError.message,
             });
-            if (pageLog.length < 50) pageLog.push({
+            if (pageLog.length < PAGE_LOG_MAX) pageLog.push({
               url: currentUrl,
               page: currentPage,
               method: req.method,
@@ -645,6 +730,23 @@ class ParserService {
               error: lastError.message,
             });
             break;
+          }
+
+          // Фільтруємо/трансформуємо записи за правилами задачі
+          const taskRules = task.rules ?? [];
+          if (taskRules.length) {
+            const beforeCount = pageRecords.length;
+            const filtered = [];
+            const filteredUrls = [];
+            for (let ri = 0; ri < pageRecords.length; ri++) {
+              const kept = _applyRules(pageRecords[ri], taskRules);
+              if (kept !== null) { filtered.push(kept); filteredUrls.push(detailUrls[ri]); }
+            }
+            if (filtered.length !== beforeCount) {
+              logger.debug('[RULES] filtered records', { before: beforeCount, after: filtered.length });
+            }
+            pageRecords = filtered;
+            detailUrls  = filteredUrls;
           }
 
           // Зберігаємо результати сторінки одразу в БД
@@ -1121,6 +1223,191 @@ class ParserService {
       jsonHtmlField: task.options?.jsonHtmlField ?? null,
       jsonPath: task.options?.jsonPath ?? null,
     };
+  }
+
+  /**
+   * Рекурсивно проходить поля типу "лінк на іншу сторінку" з follow:true,
+   * отримує сторінку/API і merge-ує результат у rec.
+   *
+   * Два режими на кожному рівні:
+   *   - є subSelectors → extractRecord / JSON-path у конкретні поля
+   *   - немає subSelectors + є urlTemplate → зберігаємо весь JSON як `${fieldName}_data`
+   *
+   * @param {object}             rec       - Запис, що мутується
+   * @param {Map<string,object>} fieldsMap - Поля для аналізу
+   * @param {string}             baseUrl   - Базовий URL для resolveUrl
+   * @param {object}             ctx       - { engine, fetchOptions, taskId, runId, idx, emit }
+   * @param {number}             [depth=0] - Глибина рекурсії (макс. 5)
+   */
+  async _followFields(rec, fieldsMap, baseUrl, ctx, depth = 0) {
+    if (depth > 4) return;
+
+    const followEntries = [...fieldsMap.entries()].filter(
+      ([, cfg]) =>
+        cfg.type === 'лінк на іншу сторінку' &&
+        cfg.follow !== false &&
+        (cfg.urlTemplate || (cfg.subSelectors && Object.keys(cfg.subSelectors).length > 0)),
+    );
+
+    for (const [fieldName, cfg] of followEntries) {
+      const subFieldsMap = this._resolveFields(cfg.subSelectors);
+      const hasSubFields = subFieldsMap.size > 0;
+
+      // Двофазна логіка:
+      // Фаза 1 (якщо є subSelectors): йдемо за href → витягуємо sub-поля (напр. goods_id)
+      // Фаза 2 (якщо є urlTemplate):  підставляємо тепер заповнені значення → API запит
+      // Якщо лише urlTemplate без subSelectors: відразу підставляємо поточні значення rec
+
+      if (hasSubFields) {
+        // Фаза 1: follow href → extract sub-fields
+        const hrefUrl = rec[fieldName];
+        if (!hrefUrl || typeof hrefUrl !== 'string') continue;
+        const pageUrl = resolveUrl(hrefUrl, baseUrl);
+        try {
+          ctx.emit(ctx.taskId, { type: 'follow:start', runId: ctx.runId, url: pageUrl, field: fieldName, index: ctx.idx });
+          // Чекаємо поки перший sub-елемент з'явиться у DOM (важливо для веб-компонентів)
+          const firstSubSelector = [...subFieldsMap.values()][0]?.selector || null;
+          const phase1Opts = firstSubSelector
+            ? { ...ctx.fetchOptions, waitFor: firstSubSelector }
+            : ctx.fetchOptions;
+          const { $: f$ } = await ctx.engine.fetchPage(pageUrl, phase1Opts);
+          const subData = extractRecord(f$, f$('body'), subFieldsMap, pageUrl);
+          logger.debug('[FOLLOW FIELD] phase1 subData', { fieldName, subData });
+          Object.assign(rec, subData);
+          ctx.emit(ctx.taskId, { type: 'follow:done', runId: ctx.runId, url: pageUrl, field: fieldName, index: ctx.idx, preview: dataPreview(subData) });
+        } catch (e) {
+          rec[`${fieldName}_error`] = e.message;
+          ctx.emit(ctx.taskId, { type: 'follow:error', runId: ctx.runId, url: pageUrl, field: fieldName, index: ctx.idx, error: e.message });
+          logger.warn('[FOLLOW FIELD] фаза 1 помилка', { taskId: ctx.taskId, fieldName, url: pageUrl, error: e.message });
+          continue;
+        }
+
+        // Затримка між фазами (налаштовується через options.followDelay)
+        if (cfg.urlTemplate && ctx.followDelay > 0) {
+          await cancellableSleep(ctx.taskId, ctx.followDelay, ctx.followDelay * 1.5);
+        }
+
+        // Фаза 2: якщо є urlTemplate — тепер підставляємо (goods_id вже в rec)
+        if (cfg.urlTemplate) {
+          // Перевіряємо що всі {{vars}} заповнені непорожніми значеннями
+          const templateVars = [...cfg.urlTemplate.matchAll(/\{\{([^}]+)\}\}/g)].map(m => m[1].trim());
+          const emptyVars = templateVars.filter(v => rec[v] == null || rec[v] === '');
+          if (emptyVars.length > 0) {
+            logger.warn('[FOLLOW FIELD] urlTemplate vars пусті, пропускаємо API запит', { fieldName, emptyVars });
+            continue;
+          }
+          const apiRaw = subst(cfg.urlTemplate, rec);
+          if (!apiRaw || /\{\{/.test(apiRaw)) {
+            logger.warn('[FOLLOW FIELD] urlTemplate не вдалося заповнити', { fieldName, template: cfg.urlTemplate });
+            continue;
+          }
+          const apiUrl = resolveUrl(apiRaw, baseUrl);
+          try {
+            ctx.emit(ctx.taskId, { type: 'follow:start', runId: ctx.runId, url: apiUrl, field: `${fieldName}→api`, index: ctx.idx });
+            const apiEngine = ctx.staticEngine ?? ctx.engine;
+            const { $: a$ } = await apiEngine.fetchPage(apiUrl, ctx.fetchOptions);
+            let apiData;
+            let jsonObj = null;
+            try { jsonObj = JSON.parse(a$('body').text()); } catch { /* not JSON */ }
+            if (jsonObj) {
+              const jFields = Array.isArray(cfg.jsonFields) && cfg.jsonFields.length ? cfg.jsonFields : null;
+              if (jFields) {
+                // Нова конфігурація jsonFields: [{path, key, format, separator}]
+                apiData = {};
+                for (const jf of jFields) {
+                  const colKey = jf.key || pathToKey(jf.path);
+                  const rawVal = resolveJsonPath(jsonObj, jf.path);
+                  apiData[`${fieldName}_${colKey}`] = applyJsonFormat(rawVal, jf.format, jf.separator, jf.template);
+                  // Зберігаємо сирий масив об'єктів для переформатування при експорті
+                  if (Array.isArray(rawVal) && rawVal.some(v => v !== null && typeof v === 'object')) {
+                    apiData[`${fieldName}_${colKey}__raw`] = JSON.stringify(rawVal);
+                  }
+                }
+              } else if (cfg.subJsonPath) {
+                // Зворотна сумісність: рядок "data.models[].name|..."
+                apiData = {};
+                for (const p of cfg.subJsonPath.split('|').map(s => s.trim()).filter(Boolean)) {
+                  apiData[`${fieldName}_${pathToKey(p)}`] = resolveJsonPath(jsonObj, p);
+                }
+              } else {
+                apiData = { [`${fieldName}_data`]: jsonObj };
+              }
+            } else {
+              apiData = { [`${fieldName}_data`]: a$('body').text() };
+            }
+            Object.assign(rec, apiData);
+            ctx.emit(ctx.taskId, { type: 'follow:done', runId: ctx.runId, url: apiUrl, field: `${fieldName}→api`, index: ctx.idx, preview: dataPreview(apiData) });
+          } catch (e) {
+            rec[`${fieldName}_api_error`] = e.message;
+            ctx.emit(ctx.taskId, { type: 'follow:error', runId: ctx.runId, url: apiUrl, field: `${fieldName}→api`, index: ctx.idx, error: e.message });
+            logger.warn('[FOLLOW FIELD] фаза 2 (API) помилка', { taskId: ctx.taskId, fieldName, url: apiUrl, error: e.message });
+          }
+        }
+
+        // Рекурсія в sub-поля (якщо вони теж мають follow)
+        await this._followFields(rec, subFieldsMap, rec[fieldName] ? resolveUrl(rec[fieldName], baseUrl) : baseUrl, ctx, depth + 1);
+
+      } else {
+        // Лише urlTemplate без subSelectors — підставляємо поточні значення rec
+        const rawUrl = subst(cfg.urlTemplate, rec);
+        if (!rawUrl || typeof rawUrl !== 'string' || /\{\{/.test(rawUrl)) continue;
+        const targetUrl = resolveUrl(rawUrl, baseUrl);
+        try {
+          ctx.emit(ctx.taskId, { type: 'follow:start', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx });
+          const { $: f$ } = await ctx.engine.fetchPage(targetUrl, ctx.fetchOptions);
+          let jsonObj = null;
+          try { jsonObj = JSON.parse(f$('body').text()); } catch { /* not JSON */ }
+          let apiData;
+          if (jsonObj && cfg.subJsonPath) {
+            const nested = resolveJsonPath(jsonObj, cfg.subJsonPath);
+            apiData = { [`${fieldName}_data`]: Array.isArray(nested) ? nested[0] : nested };
+          } else {
+            apiData = { [`${fieldName}_data`]: jsonObj ?? f$('body').text() };
+          }
+          Object.assign(rec, apiData);
+          ctx.emit(ctx.taskId, { type: 'follow:done', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx, preview: dataPreview(apiData) });
+        } catch (e) {
+          rec[`${fieldName}_error`] = e.message;
+          ctx.emit(ctx.taskId, { type: 'follow:error', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx, error: e.message });
+          logger.warn('[FOLLOW FIELD] помилка', { taskId: ctx.taskId, fieldName, url: targetUrl, error: e.message });
+        }
+      }
+    }
+  }
+
+  /**
+   * Прямий JSON-режим: витягує записи з масиву JSON-об'єктів без HTML bridge.
+   * Поле field.selector трактується як JSON-шлях (підтримує [] нотацію).
+   * Якщо selector порожній — використовується ім'я поля як ключ у JSON-об'єкті.
+   */
+  _extractJsonRecords(items, fields) {
+    const records = [];
+    for (const item of items) {
+      const record = {};
+      for (const [name, field] of fields.entries()) {
+        const path = field.selector || name; // selector = JSON шлях або ім'я поля
+        const raw = resolveJsonPath(item, path);
+        if (raw == null) {
+          record[name] = '';
+          continue;
+        }
+        if (Array.isArray(raw)) {
+          const sep = field.attr || ', '; // attr перевикористовується як роздільник у JSON-режимі
+          record[name] = raw
+            .map(v => (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v ?? ''))
+            .join(sep);
+        } else {
+          record[name] = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
+        }
+        if (field.transform) {
+          const { applyTransform } = require('../../utils/helpers');
+          record[name] = applyTransform(record[name], field.transform) ?? '';
+        }
+      }
+      const hasData = Object.values(record).some(v => v !== '');
+      if (hasData) records.push(record);
+    }
+    return records;
   }
 
   /**

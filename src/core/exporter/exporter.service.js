@@ -16,30 +16,60 @@ const resultRepo = require("../../db/repositories/result.repository");
 const subtaskRepo = require("../../db/repositories/subtask.repository");
 const taskRepo = require("../../db/repositories/task.repository");
 const logger = require("../../utils/logger");
+const { applyJsonFormat } = require("../../utils/json-utils");
 
 class ExporterService {
   // Shared row-building pipeline used by all to* methods
   _resolveRows(records, stMap, opts) {
     const { keyField = null, fieldTypes = {}, uniqueField = null,
-      aggregateFields = [], mode = null,
+      aggregateFields = [], mode = null, jsonConfig = null,
       deltaFields = [], dateFrom = null, dateTo = null } = opts;
     let rows = mode === "delta"
       ? this._buildDeltaRows(records, keyField, { deltaFields, dateFrom, dateTo })
       : this._buildProductRows(records, stMap, keyField);
     rows = this._applyNormalization(rows, fieldTypes);
     if (mode !== "delta") rows = this._dedupAndAggregate(rows, uniqueField, aggregateFields);
+    rows = this._applyJsonConfig(rows, jsonConfig);
     return rows;
+  }
+
+  // Re-format __raw columns at export time; hide raw cols from output
+  _applyJsonConfig(rows, jsonConfig) {
+    if (!rows.length) return rows;
+    const cfgMap = new Map((jsonConfig || []).map(c => [c.column, c]));
+    const hasRaw = Object.keys(rows[0]).some(k => k.endsWith('__raw'));
+    if (!hasRaw && !cfgMap.size) return rows;
+    return rows.map(row => {
+      const out = {};
+      for (const [key, val] of Object.entries(row)) {
+        if (key.endsWith('__raw')) continue; // always hidden
+        const cfg = cfgMap.get(key);
+        if (cfg) {
+          const rawStr = row[`${key}__raw`];
+          if (rawStr) {
+            try {
+              const arr = JSON.parse(rawStr);
+              out[key] = applyJsonFormat(arr, cfg.format, cfg.separator || null, cfg.template || null) ?? '';
+              continue;
+            } catch { /* fall through to original value */ }
+          }
+        }
+        out[key] = val;
+      }
+      return out;
+    });
   }
 
   async toJson(
     taskId,
     { runId, fields = [], fieldLabels = {}, filters = {}, keyField = null,
       fieldTypes = {}, uniqueField = null, aggregateFields = [],
-      mode = null, deltaFields = [], dateFrom = null, dateTo = null } = {},
+      mode = null, deltaFields = [], dateFrom = null, dateTo = null,
+      jsonConfig = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
     const stMap = await this._loadSubTaskMap(taskId, records);
-    const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo });
+    const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
     const selected = this._applyFieldSelection(rows, fields, fieldLabels);
     return JSON.stringify(selected.rows, null, 2);
   }
@@ -48,12 +78,13 @@ class ExporterService {
     taskId,
     { runId, fields = [], fieldLabels = {}, filters = {}, keyField = null,
       fieldTypes = {}, uniqueField = null, aggregateFields = [],
-      mode = null, deltaFields = [], dateFrom = null, dateTo = null } = {},
+      mode = null, deltaFields = [], dateFrom = null, dateTo = null,
+      jsonConfig = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
     if (!records.length) return "";
     const stMap = await this._loadSubTaskMap(taskId, records);
-    const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo });
+    const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
     const selected = this._applyFieldSelection(rows, fields, fieldLabels);
     try {
       const parser = new Json2CsvParser({ fields: Object.keys(selected.rows[0] || {}) });
@@ -69,7 +100,7 @@ class ExporterService {
     { runId, fields = [], fieldLabels = {}, filters = {}, taskName = "Results",
       keyField = null, fieldTypes = {}, uniqueField = null, aggregateFields = [],
       mode = null, deltaFields = [], dateFrom = null, dateTo = null,
-      stream = null } = {},
+      stream = null, jsonConfig = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
     const stMap = await this._loadSubTaskMap(taskId, records);
@@ -77,12 +108,13 @@ class ExporterService {
     workbook.creator = "Web Parser Pro";
     workbook.created = new Date();
 
-    const sheetName = mode === "delta" ? "Дельта" : (taskName.slice(0, 28) || "Результати");
+    const sheetName = mode === "delta" ? "Дельта"
+      : (taskName.replace(/[*?:/\\[\]]/g, "-").slice(0, 28) || "Результати");
     const sheet1 = workbook.addWorksheet(sheetName);
     if (!records.length) {
       sheet1.addRow(["No data"]);
     } else {
-      const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo });
+      const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
       this._fillSheet(sheet1, this._applyFieldSelection(rows, fields, fieldLabels).rows, "FF2563EB");
     }
 
@@ -114,12 +146,13 @@ class ExporterService {
     { runId, filters = {}, fieldSep = "\t", recordSep = "\n", template = null,
       includeHeader = true, fields = [], keyField = null,
       fieldTypes = {}, uniqueField = null, aggregateFields = [],
-      mode = null, deltaFields = [], dateFrom = null, dateTo = null } = {},
+      mode = null, deltaFields = [], dateFrom = null, dateTo = null,
+      jsonConfig = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
     if (!records.length) return "";
     const stMap = await this._loadSubTaskMap(taskId, records);
-    const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo });
+    const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
     const selected = this._applyFieldSelection(rows, fields, {});
 
     const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
@@ -178,7 +211,7 @@ class ExporterService {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Web Parser Pro";
     workbook.created = new Date();
-    const sheet1 = workbook.addWorksheet(domain.slice(0, 28) || "Домен");
+    const sheet1 = workbook.addWorksheet(domain.replace(/[*?:/\\[\]]/g, "-").slice(0, 28) || "Домен");
     if (!records.length) {
       sheet1.addRow(["No data"]);
     } else {
@@ -413,17 +446,19 @@ class ExporterService {
     if (!rows.length) return { rows, keys: [], headers: [] };
     const sourceKeys = Object.keys(rows[0]);
     const selectedKeys = fields && fields.length ? fields : sourceKeys;
+    // Pre-compute label map once — avoids per-row property lookups
+    const labelFor = Object.fromEntries(selectedKeys.map(k => [k, fieldLabels[k] || k]));
     const selectedRows = rows.map((row) => {
       const output = {};
       for (const key of selectedKeys) {
-        output[fieldLabels[key] || key] = row[key] ?? "";
+        output[labelFor[key]] = row[key] ?? "";
       }
       return output;
     });
     return {
       rows: selectedRows,
       keys: selectedKeys,
-      headers: selectedKeys.map((key) => fieldLabels[key] || key),
+      headers: selectedKeys.map(k => labelFor[k]),
     };
   }
 
@@ -630,11 +665,20 @@ class ExporterService {
     }
     for (const [key, val] of Object.entries(obj)) {
       const path = prefix ? `${prefix}${key}` : key;
-      if (val && typeof val === "object" && !Array.isArray(val)) {
-        this._flatten(val, `${path}.`, result);
+      if (Array.isArray(val)) {
+        // масив об'єктів → JSON рядок; масив примітивів → через кому
+        const hasObjects = val.some((v) => v !== null && typeof v === "object");
+        result[path] = hasObjects ? JSON.stringify(val) : val.join(", ");
+      } else if (val && typeof val === "object") {
+        // поля _data / _models / _brands (API-відповідь) не розгортаємо — JSON рядок
+        const isApiField = !prefix && /_(?:data|models|brands|items|results)$/.test(key);
+        if (isApiField) {
+          result[path] = JSON.stringify(val);
+        } else {
+          this._flatten(val, `${path}.`, result);
+        }
       } else {
-        const raw = Array.isArray(val) ? val.join(", ") : val;
-        result[path] = this._normalizeText(raw);
+        result[path] = this._normalizeText(val);
       }
     }
     return result;

@@ -37,13 +37,25 @@ const xpathDocCache = new WeakMap();
  * @returns {string|string[]|null} Витягнуте значення або null
  */
 const extractField = ($, el, field, baseUrl = '') => {
-  const { selector, selectorType = 'css', attr = null, transform = null, multiple = false } = field;
+  const { selector, selectorType = 'css', attr = null, transform = null, multiple = false, type = null, subSelectors = null } = field;
 
   let elements;
-  if (selectorType === 'xpath') {
+  if (!selector || !String(selector).trim()) {
+    // Порожній селектор = сам контейнер (напр. читати data-атрибут з елемента-контейнера списку)
+    elements = $(el);
+  } else if (selectorType === 'xpath') {
     elements = xpathSelect($, el, selector);
   } else {
     elements = $(selector, el);
+  }
+
+  // Список: "selector" знаходить повторювані під-контейнери (напр. кожен тариф знижки),
+  // а subSelectors витягують поля відносно кожного з них -> масив об'єктів замість масиву значень.
+  if (type === 'список' && subSelectors && Object.keys(subSelectors).length) {
+    const subFieldsMap = subSelectors instanceof Map ? subSelectors : new Map(Object.entries(subSelectors));
+    const items = [];
+    elements.each((_, elem) => items.push(extractRecord($, elem, subFieldsMap, baseUrl)));
+    return items;
   }
 
   /**

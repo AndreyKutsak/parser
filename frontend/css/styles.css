@@ -284,6 +284,9 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 }
 .field-row .form-control { padding: 6px 10px; }
 .field-row .btn-xs { padding: 5px 8px; }
+.field-link-sub { margin-top: 0; }
+.link-subfields .field-row { background: transparent; }
+.link-subfields .field-link-sub { background: color-mix(in srgb, var(--primary, #2563eb) 4%, var(--bg-2, #f8fafc)); }
 
 /* ── Requests editor ─────────────────────────────────────────────── */
 .request-row {

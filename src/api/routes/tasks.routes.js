@@ -3,14 +3,18 @@ const tasks = require('../controllers/tasks.controller');
 const results = require('../controllers/results.controller');
 const exporter = require('../controllers/export.controller');
 const analytics = require('../controllers/analytics.controller');
-const { requireAuth } = require('../middlewares/auth.middleware');
-const { validateCreate, validateUpdate } = require('../validators/task.validator');
+const preview = require('../controllers/preview.controller');
+const { requireAuth, requireApiToken } = require('../middlewares/auth.middleware');
+const { validateCreate, validateUpdate, validatePreview } = require('../validators/task.validator');
 
 // SSE live — auth via ?token= query param (EventSource cannot set headers), must be BEFORE router.use(requireAuth)
 router.get('/:id/live',    tasks.live);
 
 // Public — no auth required
 router.get('/:taskId/results/search', results.search);
+
+// Selector test/preview — protected by a static API token (PREVIEW_API_TOKEN), not a user JWT
+router.post('/preview', requireApiToken, validatePreview, preview.preview);
 
 router.use(requireAuth);
 

@@ -30,6 +30,14 @@ const parseFieldTypes = (value) => {
 const parseArray = (value) =>
   Array.isArray(value) ? value : value ? [value] : [];
 
+const parseJsonConfig = (value) => {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch { return null; }
+};
+
 const parseExportParams = (query) => ({
   fields: parseArray(query.fields),
   fieldLabels: parseFieldLabels(query.fieldLabels),
@@ -40,6 +48,7 @@ const parseExportParams = (query) => ({
   deltaFields: parseArray(query.deltaFields),
   dateFrom: query.dateFrom || null,
   dateTo: query.dateTo || null,
+  jsonConfig: parseJsonConfig(query.jsonConfig),
   filters: {
     status: query.status,
     changed: query.changed,

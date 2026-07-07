@@ -1,7 +1,7 @@
 const Joi = require("joi");
 
 const fieldSchema = Joi.object({
-  selector: Joi.string().required(),
+  selector: Joi.string().allow("", null).default(null),
   selectorType: Joi.string().valid("css", "xpath").default("css"),
   attr: Joi.string().allow(null, "").default(null),
   transform: Joi.alternatives(
@@ -10,6 +10,18 @@ const fieldSchema = Joi.object({
   ).allow(null),
   multiple: Joi.boolean().default(false),
   monitor: Joi.boolean().default(false),
+  type: Joi.string().allow("", null).default(null),
+  follow: Joi.boolean().default(false),
+  urlTemplate: Joi.string().allow("", null).default(null),
+  subJsonPath: Joi.string().allow("", null).default(null),
+  jsonFields: Joi.array().items(Joi.object({
+    path:      Joi.string().required(),
+    key:       Joi.string().allow("", null).default(null),
+    format:    Joi.string().valid("join", "join_semi", "join_nl", "first", "count", "json", "template").default("join"),
+    separator: Joi.string().allow("", null).default(null),
+    template:  Joi.string().allow("", null).default(null),
+  })).default([]),
+  subSelectors: Joi.any().default({}),
 });
 
 const paginationSchema = Joi.object({
@@ -72,7 +84,10 @@ const createTaskSchema = Joi.object({
 
   schedule: Joi.object({
     enabled: Joi.boolean().default(false),
-    cron: Joi.string().when("enabled", { is: true, then: Joi.required() }),
+    cron: Joi.string().allow("", null).default(null).when("enabled", {
+      is: true,
+      then: Joi.string().min(1).required(),
+    }),
     runOnce: Joi.boolean().default(false),
   }).default({}),
 
@@ -86,6 +101,8 @@ const createTaskSchema = Joi.object({
     timeout: Joi.number().integer().min(1000).max(120000).default(30000),
     retries: Joi.number().integer().min(0).max(10).default(3),
     delay: Joi.number().integer().min(0).max(30000).default(1000),
+    followDelay: Joi.number().integer().min(0).max(30000).default(0),
+    detailConcurrency: Joi.number().integer().min(1).max(20).default(3),
     headers: Joi.object().pattern(Joi.string(), Joi.string()).default({}),
     cookies: Joi.string().allow("", null),
     antiBot: Joi.boolean().default(true),
@@ -116,6 +133,15 @@ const createTaskSchema = Joi.object({
     cron: Joi.string().allow("", null).default(null),
   }).default({}),
 
+  rules: Joi.array().items(Joi.object({
+    field:       Joi.string().required(),
+    operator:    Joi.string().valid('contains','not_contains','equals','not_equals','starts_with','ends_with','regex','empty','not_empty','gt','lt').default('contains'),
+    value:       Joi.string().allow('', null).default(''),
+    action:      Joi.string().valid('skip', 'set_field').default('skip'),
+    targetField: Joi.string().allow('', null).default(null),
+    targetValue: Joi.string().allow('', null).default(null),
+  })).default([]),
+
   tags: Joi.array().items(Joi.string().max(50)).default([]),
 });
 
@@ -123,6 +149,44 @@ const updateTaskSchema = createTaskSchema.fork(
   ["name", "url", "selectors"],
   (s) => s.optional(),
 );
+
+const previewSchema = Joi.object({
+  url: Joi.string().uri().required(),
+  engine: Joi.string().valid("static", "dynamic").default("static"),
+
+  selectors: Joi.object({
+    item: Joi.string().allow("", null).default(null),
+    fields: Joi.object()
+      .pattern(Joi.string().max(100), fieldSchema)
+      .min(1)
+      .required()
+      .messages({
+        "any.required": "selectors.fields must have at least one field",
+      }),
+  }).required(),
+
+  proxy: Joi.object({
+    enabled: Joi.boolean().default(false),
+    rotate: Joi.boolean().default(true),
+    proxyId: Joi.string().hex().length(24).allow(null).default(null),
+  }).default({}),
+
+  options: Joi.object({
+    method: Joi.string().valid("GET", "POST").default("GET"),
+    body: Joi.object({
+      format: Joi.string().valid("json", "form", "raw").default("json"),
+      data: Joi.alternatives(Joi.string(), Joi.object(), Joi.number())
+        .allow(null)
+        .default(null),
+    }).default({}),
+    headers: Joi.object().pattern(Joi.string(), Joi.string()).default({}),
+    cookies: Joi.string().allow("", null).default(null),
+    antiBot: Joi.boolean().default(true),
+    timeout: Joi.number().integer().min(1000).max(60000).default(20000),
+    jsonHtmlField: Joi.string().allow("", null).default(null),
+    jsonPath: Joi.string().allow("", null).default(null),
+  }).default({}),
+});
 
 const validate = (schema) => (req, res, next) => {
   const { error, value } = schema.validate(req.body, {
@@ -146,4 +210,5 @@ const validate = (schema) => (req, res, next) => {
 module.exports = {
   validateCreate: validate(createTaskSchema),
   validateUpdate: validate(updateTaskSchema),
+  validatePreview: validate(previewSchema),
 };

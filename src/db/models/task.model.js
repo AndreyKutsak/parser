@@ -13,23 +13,33 @@ const mongoose = require("mongoose");
 
 /**
  * Опис одного поля для витягування.
- * Визначає, як знайти та обробити значення всередині елемента-контейнера.
  *
  * @property {string}  selector     - CSS-селектор або XPath-вираз
- * @property {string}  selectorType - Тип селектора: 'css' | 'xpath'
- * @property {string}  attr         - HTML-атрибут для читання (null = текстовий вміст)
- * @property {*}       transform    - Рядок або масив трансформацій (trim, uppercase, тощо)
- * @property {boolean} multiple     - true = зібрати всі збіги, false = лише перший
- * @property {boolean} monitor      - true = відстежувати зміни цього поля, false = ні
+ * @property {string}  selectorType - Тип: 'css' | 'xpath'
+ * @property {string}  attr         - HTML-атрибут (null = текст)
+ * @property {*}       transform    - Трансформації (trim, number, тощо)
+ * @property {boolean} multiple     - Зібрати всі збіги
+ * @property {boolean} monitor      - Відстежувати зміни
+ * @property {string}  type         - Семантичний тип (назва, ціна, лінк на іншу сторінку, …)
+ * @property {boolean} follow       - Переходити за посиланням і збирати підселектори
+ * @property {string}  urlTemplate  - Шаблон URL з {{поле}} — генерувати на льоту
+ * @property {string}  subJsonPath  - Крапковий шлях до об'єкта в JSON-відповіді
+ * @property {*}       subSelectors - Вкладені поля зі сторінки посилання (рекурсивно)
  */
 const fieldSchema = new mongoose.Schema(
   {
-    selector: { type: String, required: true },
+    selector:     { type: String, default: null },
     selectorType: { type: String, enum: ["css", "xpath"], default: "css" },
-    attr: { type: String, default: null },
-    transform: { type: mongoose.Schema.Types.Mixed, default: null },
-    multiple: { type: Boolean, default: false },
-    monitor: { type: Boolean, default: false },
+    attr:         { type: String, default: null },
+    transform:    { type: mongoose.Schema.Types.Mixed, default: null },
+    multiple:     { type: Boolean, default: false },
+    monitor:      { type: Boolean, default: false },
+    type:         { type: String, default: null },
+    follow:       { type: Boolean, default: false },
+    urlTemplate:  { type: String, default: null },
+    subJsonPath:  { type: String, default: null },
+    jsonFields:   { type: mongoose.Schema.Types.Mixed, default: [] },
+    subSelectors: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { _id: false },
 );
@@ -190,6 +200,8 @@ const taskSchema = new mongoose.Schema(
       timeout: { type: Number, default: 30000 },
       retries: { type: Number, default: 3 },
       delay: { type: Number, default: 1000 },
+      followDelay: { type: Number, default: 0 },
+      detailConcurrency: { type: Number, default: 3 },
       headers: { type: Map, of: String, default: () => new Map() },
       cookies: { type: String },
       antiBot: { type: Boolean, default: true },
@@ -243,6 +255,16 @@ const taskSchema = new mongoose.Schema(
       lastActivity: { type: Date },
       lastError: { type: String },
     },
+
+    rules: [{
+      field:       { type: String, required: true },
+      operator:    { type: String, default: 'contains' },
+      value:       { type: String, default: '' },
+      action:      { type: String, default: 'skip' },
+      targetField: { type: String, default: null },
+      targetValue: { type: String, default: null },
+      _id:         false,
+    }],
 
     tags: [{ type: String }],
 

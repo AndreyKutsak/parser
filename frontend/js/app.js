@@ -131,6 +131,8 @@ const state = {
   fields: [], // list-level field rows
   detailFields: [], // detail-page field rows
   requests: [], // multi-request list
+  rules: [], // processing rules
+  currentTask: null, // task loaded on results page
   results: [],
   exportFieldConfig: null,
   currentSubTask: { taskId: null, subTaskId: null }, // for history export
@@ -625,6 +627,7 @@ const openTaskModal = (task = null) => {
   state.editingTask = task;
   state.fields = [];
   state.parsedFieldNames = [];
+  state.rules = [];
 
   document.getElementById("task-modal-title").textContent = task
     ? "Редагувати задачу"
@@ -643,6 +646,8 @@ const openTaskModal = (task = null) => {
   f("tf-timeout", task?.options?.timeout || 30000);
   f("tf-retries", task?.options?.retries || 3);
   f("tf-delay", task?.options?.delay || 1000);
+  f("tf-follow-delay", task?.options?.followDelay || 0);
+  f("tf-detail-concurrency", task?.options?.detailConcurrency || 3);
   f("tf-cron", task?.schedule?.cron || "");
   document.getElementById("tf-schedule-enabled").checked =
     task?.schedule?.enabled || false;
@@ -708,10 +713,7 @@ const openTaskModal = (task = null) => {
 
   // Load fields
   const fieldsMap = task?.selectors?.fields || {};
-  state.fields = Object.entries(fieldsMap).map(([name, cfg]) => ({
-    name,
-    ...cfg,
-  }));
+  state.fields = fieldsObjToArr(fieldsMap);
   renderFieldRows();
 
   // Load requests
@@ -747,6 +749,10 @@ const openTaskModal = (task = null) => {
     ...cfg,
   }));
   renderDetailFieldRows();
+
+  // Load rules
+  state.rules = (task?.rules || []).map(r => ({ ...r }));
+  renderTaskRules();
 
   document.getElementById("task-modal").classList.add("open");
   syncSimpleScheduleControl(task?.schedule?.cron || "");
@@ -1018,10 +1024,7 @@ const applyDomainProfile = (profile) => {
     profile.pagination?.enabled || false;
 
   const fieldsMap = profile.selectors?.fields || {};
-  state.fields = Object.entries(fieldsMap).map(([name, cfg]) => ({
-    name,
-    ...cfg,
-  }));
+  state.fields = fieldsObjToArr(fieldsMap);
   renderFieldRows();
 
   const detailFieldsMap = profile.selectors?.detailFields || {};
@@ -1044,128 +1047,379 @@ const closeTaskModal = () => {
   state.editingTask = null;
 };
 
-const renderFieldRows = () => {
-  const container = document.getElementById("fields-container");
-  container.innerHTML = state.fields
-    .map(
-      (f, i) => `
-    <div class="field-row" data-idx="${i}">
-      <input class="form-control" placeholder="назва поля" value="${escHtml(f.name || "")}"
-             oninput="updateField(${i},'name',this.value)">
-      <select class="form-control" name="field-type" onchange="updateField(${i},'type',this.value)">
-        <option value="">тип поля</option>
-        <option value="назва" ${f.type === "назва" ? "selected" : ""}>назва</option>
-        <option value="опис" ${f.type === "опис" ? "selected" : ""}>опис</option>
-        <option value="ціна" ${f.type === "ціна" ? "selected" : ""}>ціна</option>
-        <option value="валюта" ${f.type === "валюта" ? "selected" : ""}>валюта</option>
-        <option value="артикул" ${f.type === "артикул" ? "selected" : ""}>артикул</option>
-        <option value="посилання на картинку" ${f.type === "посилання на картинку" ? "selected" : ""}>посилання на картинку</option>
-        <option value="лінк на іншу сторінку" ${f.type === "лінк на іншу сторінку" ? "selected" : ""}>лінк на іншу сторінку</option>
-        <option value="інше" ${f.type === "інше" ? "selected" : ""}>інше</option>
-      </select>
-      <input class="form-control" placeholder="CSS-селектор" value="${escHtml(f.selector || "")}"
-             oninput="updateField(${i},'selector',this.value)">
-      <input class="form-control" placeholder="атрибут (напр. href)" value="${escHtml(f.attr || "")}"
-             oninput="updateField(${i},'attr',this.value)">
-      <input class="form-control" placeholder="трансформація (trim, number…)" value="${escHtml(Array.isArray(f.transform) ? f.transform.join(",") : f.transform || "")}"
-             oninput="updateField(${i},'transform',this.value)">
-      <label style="display:flex;align-items:center;gap:6px;">
-        <input type="checkbox" ${f.monitor ? "checked" : ""} onchange="updateField(${i},'monitor',this.checked)"> монітор
-      </label>
-      <button class="btn btn-xs btn-ghost" onclick="openSelectorPicker(${i})" title="Вибрати елемент візуально">🎯</button>
-      <button class="btn btn-xs btn-danger" onclick="removeField(${i})">✕</button>
-    </div>
-  `,
-    )
-    .join("");
+// ── Path helpers for nested field access ─────────────────────────────────────
+const _pathFromStr = (s) => s.split('-').map(Number);
+
+const _getFieldAtPath = (path) => {
+  let arr = state.fields;
+  let f;
+  for (const idx of path) {
+    f = arr[idx];
+    arr = f?.subSelectors || [];
+  }
+  return f;
 };
 
-const updateField = (i, key, val) => {
-  state.fields[i][key] = val;
+const _getParentArrAtPath = (path) => {
+  if (path.length === 1) return state.fields;
+  const parentPath = path.slice(0, -1);
+  return _getFieldAtPath(parentPath).subSelectors;
 };
 
-const syncFieldsFromDOM = () => {
-  document
-    .querySelectorAll("#fields-container .field-row")
-    .forEach((row, i) => {
-      if (!state.fields[i]) return;
-      const inputs = row.querySelectorAll("input");
-      state.fields[i].name = inputs[0]?.value ?? "";
-      state.fields[i].selector = inputs[1]?.value ?? "";
-      state.fields[i].attr = inputs[2]?.value ?? "";
-      state.fields[i].transform = inputs[3]?.value ?? "";
-      // Додамо type, якщо є
-      const typeInput = row.querySelector("select[name='field-type']");
-      state.fields[i].type = typeInput?.value ?? "";
-      const monitorInput = row.querySelector("input[type='checkbox']");
-      state.fields[i].monitor = monitorInput?.checked || false;
-    });
+const updateFieldAtPath = (pathStr, key, val) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  if (!f) return;
+  f[key] = val;
+  if (key === 'type' || key === 'follow') renderFieldRows();
 };
 
-const removeField = (i) => {
-  syncFieldsFromDOM();
-  state.fields.splice(i, 1);
-  renderFieldRows();
-};
-const addField = () => {
-  syncFieldsFromDOM();
-  state.fields.push({
-    name: "",
-    selector: "",
-    attr: null,
-    transform: null,
-    type: "",
-    monitor: false,
-  });
+const removeFieldAtPath = (pathStr) => {
+  const path = _pathFromStr(pathStr);
+  const arr = _getParentArrAtPath(path);
+  arr.splice(path[path.length - 1], 1);
   renderFieldRows();
 };
 
-const openSelectorPicker = (fieldIdx) => {
+const addSubFieldAtPath = (pathStr) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  if (!f.subSelectors) f.subSelectors = [];
+  f.subSelectors.push({ name: '', selector: '', attr: null, transform: null, type: '', monitor: false });
+  renderFieldRows();
+};
+
+const addJsonFieldAtPath = (pathStr) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  if (!f.jsonFields) f.jsonFields = [];
+  f.jsonFields.push({ path: '', key: '', format: 'join' });
+  renderFieldRows();
+};
+
+const updateJsonFieldAtPath = (pathStr, idx, key, val) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  if (!f.jsonFields?.[idx]) return;
+  f.jsonFields[idx][key] = val;
+};
+
+const removeJsonFieldAtPath = (pathStr, idx) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  if (!f.jsonFields) return;
+  f.jsonFields.splice(idx, 1);
+  renderFieldRows();
+};
+
+// ── Правила обробки записів ──────────────────────────────────────────────────
+
+const RULE_OPERATORS = [
+  ['contains',     'містить'],
+  ['not_contains', 'не містить'],
+  ['equals',       'дорівнює'],
+  ['not_equals',   'не дорівнює'],
+  ['starts_with',  'починається з'],
+  ['ends_with',    'закінчується на'],
+  ['regex',        'regex'],
+  ['empty',        'порожнє'],
+  ['not_empty',    'не порожнє'],
+  ['gt',           '>'],
+  ['lt',           '<'],
+];
+
+const RULE_ACTIONS = [
+  ['skip',      'Пропустити запис'],
+  ['set_field', 'Встановити поле'],
+];
+
+const renderTaskRules = () => {
+  const container = document.getElementById('task-rules-list');
+  if (!container) return;
+  const rules = state.rules || [];
+  if (!rules.length) {
+    container.innerHTML = '<p style="font-size:12px;color:var(--text-2);font-style:italic">Правила відсутні. Всі зібрані записи будуть збережені.</p>';
+    return;
+  }
+  container.innerHTML = rules.map((r, i) => {
+    const opOptions  = RULE_OPERATORS.map(([v,l]) => `<option value="${v}" ${r.operator===v?'selected':''}>${l}</option>`).join('');
+    const actOptions = RULE_ACTIONS.map(([v,l]) => `<option value="${v}" ${r.action===v?'selected':''}>${l}</option>`).join('');
+    const hasVal  = !['empty','not_empty'].includes(r.operator||'contains');
+    const isSet   = r.action === 'set_field';
+    return `<div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;flex-wrap:nowrap;">
+      <input class="form-control" style="font-size:12px;flex:1;min-width:80px" placeholder="поле"
+             title="Назва поля запису (наприклад: назва, ціна, ссилка)"
+             value="${escHtml(r.field||'')}"
+             oninput="updateTaskRule(${i},'field',this.value)">
+      <select class="form-control" style="font-size:12px;width:130px;flex-shrink:0"
+              onchange="updateTaskRule(${i},'operator',this.value);renderTaskRules()">${opOptions}</select>
+      <input class="form-control" style="font-size:12px;flex:1;min-width:80px;${hasVal?'':'display:none'}" placeholder="значення"
+             value="${escHtml(r.value||'')}"
+             oninput="updateTaskRule(${i},'value',this.value)">
+      <select class="form-control" style="font-size:12px;width:155px;flex-shrink:0"
+              onchange="updateTaskRule(${i},'action',this.value);renderTaskRules()">${actOptions}</select>
+      <input class="form-control" style="font-size:12px;width:90px;flex-shrink:0;${isSet?'':'display:none'}" placeholder="поле"
+             title="Яке поле встановити"
+             value="${escHtml(r.targetField||'')}"
+             oninput="updateTaskRule(${i},'targetField',this.value)">
+      <input class="form-control" style="font-size:12px;flex:1;min-width:80px;${isSet?'':'display:none'}" placeholder="нове значення"
+             value="${escHtml(r.targetValue||'')}"
+             oninput="updateTaskRule(${i},'targetValue',this.value)">
+      <button class="btn btn-xs btn-danger" style="flex-shrink:0" onclick="removeTaskRule(${i})">✕</button>
+    </div>`;
+  }).join('');
+};
+
+const addTaskRule = () => {
+  if (!state.rules) state.rules = [];
+  state.rules.push({ field: '', operator: 'contains', value: '', action: 'skip', targetField: null, targetValue: null });
+  renderTaskRules();
+};
+
+const removeTaskRule = (i) => {
+  state.rules.splice(i, 1);
+  renderTaskRules();
+};
+
+const updateTaskRule = (i, key, val) => {
+  if (state.rules?.[i]) state.rules[i][key] = val;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const openSelectorPickerAtPath = (pathStr) => {
   const url = document.getElementById("tf-url").value.trim();
   Selector.open(url, (selector, type) => {
-    state.fields[fieldIdx].selector = selector;
-    if (type && !state.fields[fieldIdx].name) {
-      state.fields[fieldIdx].name = type;
-    }
-    if (type) {
-      state.fields[fieldIdx].type = type;
-    }
+    const f = _getFieldAtPath(_pathFromStr(pathStr));
+    if (!f) return;
+    f.selector = selector;
+    if (type && !f.name) f.name = type;
+    if (type) f.type = type;
     renderFieldRows();
   });
 };
+
+const _fieldTypeOptions = (cur) => `
+  <option value="">тип поля</option>
+  <option value="назва" ${cur==='назва'?'selected':''}>назва</option>
+  <option value="опис" ${cur==='опис'?'selected':''}>опис</option>
+  <option value="ціна" ${cur==='ціна'?'selected':''}>ціна</option>
+  <option value="валюта" ${cur==='валюта'?'selected':''}>валюта</option>
+  <option value="артикул" ${cur==='артикул'?'selected':''}>артикул</option>
+  <option value="посилання на картинку" ${cur==='посилання на картинку'?'selected':''}>посилання на картинку</option>
+  <option value="лінк на іншу сторінку" ${cur==='лінк на іншу сторінку'?'selected':''}>лінк на іншу сторінку</option>
+  <option value="список" ${cur==='список'?'selected':''}>список (повторювані під-елементи)</option>
+  <option value="інше" ${cur==='інше'?'selected':''}>інше</option>`;
+
+const _renderFieldItem = (f, pathStr, depth = 0) => {
+  const isLink = f.type === 'лінк на іншу сторінку';
+  const isList = f.type === 'список';
+  const hasFollow = f.follow !== false;
+  const subSels = f.subSelectors || [];
+  const ml = depth > 0 ? `margin-left:${depth * 20}px;` : '';
+  const isJsonMode = !!(document.getElementById('tf-json-path')?.value?.trim());
+
+  const selectorPlaceholder = isJsonMode
+    ? 'JSON шлях (напр. name, meta.price, tags[].color)'
+    : isList
+      ? 'CSS-селектор повторюваного під-елемента (напр. .quantity_discount)'
+      : 'CSS-селектор';
+  const attrPlaceholder = isJsonMode ? 'роздільник масиву (за замовч. ", ")' : 'атрибут (напр. href)';
+
+  const mainRow = `<div class="field-row" data-path="${pathStr}" style="${ml}">
+    <input class="form-control" placeholder="назва поля" value="${escHtml(f.name || '')}"
+           oninput="updateFieldAtPath('${pathStr}','name',this.value)">
+    <select class="form-control" name="field-type" onchange="updateFieldAtPath('${pathStr}','type',this.value)">
+      ${_fieldTypeOptions(f.type)}
+    </select>
+    <input class="form-control" placeholder="${selectorPlaceholder}" value="${escHtml(f.selector || '')}"
+           title="${isJsonMode ? 'JSON шлях: name → поле name, meta.price → вкладений об\'єкт, tags[] → масив, tags[].color → поле з кожного елементу масиву' : ''}"
+           oninput="updateFieldAtPath('${pathStr}','selector',this.value)">
+    <input class="form-control" placeholder="${attrPlaceholder}" value="${escHtml(f.attr || '')}"
+           oninput="updateFieldAtPath('${pathStr}','attr',this.value)">
+    <input class="form-control" placeholder="трансформація (trim, number…)" value="${escHtml(Array.isArray(f.transform)?f.transform.join(','):f.transform||'')}"
+           oninput="updateFieldAtPath('${pathStr}','transform',this.value)">
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" ${f.monitor?'checked':''} onchange="updateFieldAtPath('${pathStr}','monitor',this.checked)"> монітор
+    </label>
+    <button class="btn btn-xs btn-ghost" onclick="openSelectorPickerAtPath('${pathStr}')" title="Вибрати елемент візуально">🎯</button>
+    <button class="btn btn-xs btn-danger" onclick="removeFieldAtPath('${pathStr}')">✕</button>
+  </div>`;
+
+  if (!isLink && !isList) return mainRow;
+
+  if (isList) {
+    const listSubSection = `<div class="field-link-sub" style="${ml}margin-bottom:10px;border-left:3px solid var(--primary,#2563eb);padding:8px 12px 8px 14px;background:var(--bg-2,#f8fafc);border-radius:0 6px 6px 0;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <span style="font-size:11px;font-weight:600;color:var(--text-2)">Поля з кожного під-елемента:</span>
+        <button class="btn btn-xs btn-ghost" onclick="addSubFieldAtPath('${pathStr}')">+ Додати поле</button>
+      </div>
+      <div class="link-subfields">
+        ${subSels.length === 0
+          ? '<p class="form-hint" style="margin:0;font-size:11px">Додайте поля, що повторюються всередині кожного знайденого елементу (напр. кількість, ціна)</p>'
+          : subSels.map((sf, si) => _renderFieldItem(sf, `${pathStr}-${si}`, depth + 1)).join('')
+        }
+      </div>
+    </div>`;
+    return mainRow + listSubSection;
+  }
+
+  const subSection = `<div class="field-link-sub" style="${ml}margin-bottom:10px;border-left:3px solid var(--primary,#2563eb);padding:8px 12px 8px 14px;background:var(--bg-2,#f8fafc);border-radius:0 6px 6px 0;">
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;font-weight:600;margin-bottom:${hasFollow?'10px':'0'}">
+      <input type="checkbox" ${hasFollow?'checked':''} onchange="updateFieldAtPath('${pathStr}','follow',this.checked)">
+      Перейти за посиланням та зібрати дані зі сторінки
+    </label>
+    ${hasFollow ? `
+      <div style="margin-bottom:10px;">
+        <label class="form-label" style="font-size:11px;margin-bottom:3px;display:block">URL шаблон <span style="font-weight:400;color:var(--text-2)">(порожнє = переходить за значенням поля)</span></label>
+        <input class="form-control" style="font-size:12px" placeholder="https://api.site.com/{{id}}/details"
+               value="${escHtml(f.urlTemplate || '')}"
+               oninput="updateFieldAtPath('${pathStr}','urlTemplate',this.value)">
+      </div>
+      ${f.urlTemplate ? `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <span style="font-size:11px;font-weight:600;color:var(--text-2)">
+            Витяг полів з JSON-відповіді
+            <span title="JSON шлях: data.items — повний масив, data.items[].name — конкретне поле з кожного елементу.&#10;Шаблон: {brand_name} ({code}) — підставляє поля об'єкта.&#10;Роздільник: символ між елементами масиву."
+                  style="cursor:help;color:var(--primary);margin-left:4px;font-size:12px">ⓘ</span>
+          </span>
+          <button class="btn btn-xs btn-ghost" onclick="addJsonFieldAtPath('${pathStr}')">+ поле</button>
+        </div>
+        ${(f.jsonFields||[]).length === 0
+          ? `<p style="font-size:11px;color:var(--text-2);margin:0;font-style:italic">Натисніть "+ поле" щоб налаштувати витяг даних з API відповіді</p>`
+          : (f.jsonFields||[]).map((jf,ji) => {
+            const fmt = jf.format || 'join';
+            const isTemplate = fmt === 'template';
+            const hasSep = fmt !== 'first' && fmt !== 'count' && fmt !== 'json';
+            return `<div style="margin-bottom:4px;">
+              <div style="display:grid;grid-template-columns:1fr 80px 120px 80px 24px;gap:4px;align-items:center;">
+                <input class="form-control" style="font-size:11px;font-family:monospace"
+                       title="JSON шлях&#10;• data.models → весь масив&#10;• data.models[].name → витягнути поле name з кожного об'єкту"
+                       placeholder="data.models[].name"
+                       value="${escHtml(jf.path||'')}"
+                       oninput="updateJsonFieldAtPath('${pathStr}',${ji},'path',this.value)">
+                <input class="form-control" style="font-size:11px"
+                       title="Назва колонки (порожньо = авто з шляху)"
+                       placeholder="колонка"
+                       value="${escHtml(jf.key||'')}"
+                       oninput="updateJsonFieldAtPath('${pathStr}',${ji},'key',this.value)">
+                <select class="form-control" style="font-size:11px"
+                        onchange="updateJsonFieldAtPath('${pathStr}',${ji},'format',this.value);renderFieldRows()">
+                  <option value="join"     ${fmt==='join'    ?'selected':''}>через роздільник</option>
+                  <option value="template" ${fmt==='template'?'selected':''}>шаблон {поле}</option>
+                  <option value="first"    ${fmt==='first'   ?'selected':''}>перший елемент</option>
+                  <option value="count"    ${fmt==='count'   ?'selected':''}>кількість</option>
+                  <option value="json"     ${fmt==='json'    ?'selected':''}>JSON масив</option>
+                </select>
+                <input class="form-control" style="font-size:11px;font-family:monospace"
+                       title="Роздільник між елементами"
+                       placeholder="${isTemplate?' | ':', '}"
+                       ${!hasSep?'disabled style="font-size:11px;opacity:.4"':''}
+                       value="${escHtml(jf.separator||'')}"
+                       oninput="updateJsonFieldAtPath('${pathStr}',${ji},'separator',this.value)">
+                <button class="btn btn-xs btn-danger" onclick="removeJsonFieldAtPath('${pathStr}',${ji})" title="Видалити">✕</button>
+              </div>
+              ${isTemplate ? `
+              <div style="margin-top:3px;padding-left:2px;">
+                <input class="form-control" style="font-size:11px;font-family:monospace"
+                       title="Шаблон рядка. Доступні поля: {id} {name} {brand_name} {industrial_code} {url} тощо"
+                       placeholder="{brand_name} ({industrial_code})"
+                       value="${escHtml(jf.template||'')}"
+                       oninput="updateJsonFieldAtPath('${pathStr}',${ji},'template',this.value)">
+              </div>` : ''}
+            </div>`;
+          }).join('')
+        }
+      </div>` : ''}
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <span style="font-size:11px;font-weight:600;color:var(--text-2)">Поля зі сторінки посилання:</span>
+        <button class="btn btn-xs btn-ghost" onclick="addSubFieldAtPath('${pathStr}')">+ Додати поле</button>
+      </div>
+      <div class="link-subfields">
+        ${subSels.length === 0
+          ? '<p class="form-hint" style="margin:0;font-size:11px">Додайте поля для витягування зі сторінки посилання</p>'
+          : subSels.map((sf, si) => _renderFieldItem(sf, `${pathStr}-${si}`, depth + 1)).join('')
+        }
+      </div>
+    ` : ''}
+  </div>`;
+
+  return mainRow + subSection;
+};
+
+const renderFieldRows = () => {
+  const container = document.getElementById("fields-container");
+  container.innerHTML = state.fields.map((f, i) => _renderFieldItem(f, String(i))).join('');
+};
+
+const addField = () => {
+  state.fields.push({ name: "", selector: "", attr: null, transform: null, type: "", monitor: false });
+  renderFieldRows();
+};
+
+const buildFieldsObj = (fields) => {
+  const obj = {};
+  // У прямому JSON-режимі поля без CSS-селектора дозволені (selector = JSON шлях або ім'я поля)
+  const isJsonMode = !!(document.getElementById('tf-json-path')?.value?.trim());
+  for (const f of fields) {
+    if (!f.name) continue;
+    const isFollowWithTemplate = f.type === 'лінк на іншу сторінку' && f.urlTemplate;
+    if (!f.selector && !isFollowWithTemplate && !isJsonMode) continue;
+    const entry = {
+      selector: f.selector,
+      selectorType: 'css',
+      attr: f.attr || null,
+      transform: Array.isArray(f.transform)
+        ? f.transform
+        : (f.transform ? f.transform.split(',').map(s => s.trim()).filter(Boolean) : null),
+      multiple: false,
+      type: f.type || null,
+      monitor: f.monitor || false,
+    };
+    if (f.type === 'лінк на іншу сторінку') {
+      entry.follow = f.follow !== false;
+      if (f.urlTemplate) entry.urlTemplate = f.urlTemplate;
+      if (f.jsonFields?.length) {
+        entry.jsonFields = f.jsonFields.filter(jf => jf.path).map(jf => ({
+          path:      jf.path,
+          key:       jf.key  || null,
+          format:    jf.format || 'join',
+          separator: jf.separator || null,
+          template:  jf.template  || null,
+        }));
+      } else if (f.subJsonPath) {
+        entry.subJsonPath = f.subJsonPath;
+      }
+      if (entry.follow && f.subSelectors?.length) {
+        entry.subSelectors = buildFieldsObj(f.subSelectors);
+      }
+    } else if (f.type === 'список' && f.subSelectors?.length) {
+      entry.subSelectors = buildFieldsObj(f.subSelectors);
+    }
+    obj[f.name] = entry;
+  }
+  return obj;
+};
+
+const fieldsObjToArr = (fieldsMap) =>
+  Object.entries(fieldsMap || {}).map(([name, cfg]) => {
+    const f = { name, ...cfg };
+    if (cfg.subSelectors && typeof cfg.subSelectors === 'object' && !Array.isArray(cfg.subSelectors)) {
+      f.subSelectors = fieldsObjToArr(cfg.subSelectors);
+    }
+    // Конвертуємо старий subJsonPath рядок у jsonFields масив для UI
+    if (!cfg.jsonFields?.length && cfg.subJsonPath) {
+      f.jsonFields = cfg.subJsonPath.split('|').map(p => p.trim()).filter(Boolean).map(p => ({
+        path: p, key: '', format: 'join',
+      }));
+    } else {
+      f.jsonFields = cfg.jsonFields || [];
+    }
+    return f;
+  });
 
 const saveTask = async () => {
   const g = (id) => document.getElementById(id)?.value?.trim();
   const gc = (id) => document.getElementById(id)?.checked;
 
-  // Build fields object — read directly from DOM
-  const fieldsObj = {};
-  document.querySelectorAll("#fields-container .field-row").forEach((row) => {
-    const inputs = row.querySelectorAll("input");
-    const name = inputs[0]?.value.trim();
-    const selector = inputs[1]?.value.trim();
-    const attr = inputs[2]?.value.trim();
-    const transform = inputs[3]?.value.trim();
-    const typeSelect = row.querySelector("select[name='field-type']");
-    const type = typeSelect?.value.trim();
-    const monitorCheckbox = row.querySelector("input[type='checkbox']");
-    const monitor = monitorCheckbox?.checked || false;
-    if (!name || !selector) return;
-    fieldsObj[name] = {
-      selector,
-      selectorType: "css",
-      attr: attr || null,
-      transform: transform
-        ? transform
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : null,
-      multiple: false,
-      type: type || null,
-      monitor,
-    };
-  });
+  // Build fields object from state (supports nested subSelectors for link-type fields)
+  const fieldsObj = buildFieldsObj(state.fields);
 
   const detailFieldsObj = {};
   document
@@ -1234,6 +1488,8 @@ const saveTask = async () => {
       timeout: parseInt(g("tf-timeout")) || 30000,
       retries: parseInt(g("tf-retries")) || 3,
       delay: parseInt(g("tf-delay")) || 1000,
+      followDelay: parseInt(g("tf-follow-delay")) || 0,
+      detailConcurrency: parseInt(g("tf-detail-concurrency")) || 3,
       antiBot: gc("tf-antibot"),
       crawl: {
         enabled: gc("tf-crawl-enabled"),
@@ -1283,6 +1539,8 @@ const saveTask = async () => {
       headers: {},
     };
   }
+
+  body.rules = (state.rules || []).filter(r => r.field && r.operator);
 
   const btn = document.getElementById("btn-save-task");
   UI.loading(btn, true);
@@ -1439,12 +1697,50 @@ const saveExportFieldConfig = (config) => {
   try { localStorage.setItem("results_export_fields", JSON.stringify(config)); } catch {}
 };
 
+// Converts JSON path to column key suffix (mirrors parser.service pathToKey)
+const pathToKeyFE = (path) => {
+  const cleaned = (path || '').replace(/\[\]/g, '').split('.').filter(Boolean);
+  const parts = cleaned[0] === 'data' && cleaned.length > 1 ? cleaned.slice(1) : cleaned;
+  return parts.join('_');
+};
+
+// Returns Map<colName, {jf config}[]> for all jsonFields in a task's selectors
+const getTaskJsonColsMap = (task) => {
+  const map = new Map(); // colName → [{format, separator, template}]
+  if (!task?.selectors?.fields) return map;
+  const fieldsMap = task.selectors.fields;
+  const fieldNames = fieldsMap instanceof Map ? [...fieldsMap.keys()] : Object.keys(fieldsMap);
+  for (const fname of fieldNames) {
+    const fdef = fieldsMap instanceof Map ? fieldsMap.get(fname) : fieldsMap[fname];
+    if (!Array.isArray(fdef?.jsonFields) || !fdef.jsonFields.length) continue;
+    for (const jf of fdef.jsonFields) {
+      const colKey = jf.key || pathToKeyFE(jf.path);
+      const colName = `${fname}_${colKey}`;
+      if (!map.has(colName)) map.set(colName, jf);
+    }
+  }
+  return map;
+};
+
 const openExportFieldsModal = () => {
   const config = loadExportFieldConfig();
+  const allDataKeys = [...new Set(state.results.flatMap((r) => Object.keys(r.data || {})))];
+
+  // Columns that have __raw in already-loaded results (actual re-format at export possible)
+  const hasRawInData = new Set(
+    allDataKeys.filter(k => k.endsWith('__raw')).map(k => k.slice(0, -5))
+  );
+
+  // Columns from task config that have jsonFields (configured for re-format, may need re-run)
+  const taskJsonColsMap = getTaskJsonColsMap(state.currentTask);
+
+  // Union: show JSON config UI for any column in either set
+  const rawBackedCols = new Set([...hasRawInData, ...taskJsonColsMap.keys()]);
+
   const fieldKeys = [
     ...new Set([
       "_url", "_page", "_detailUrl",
-      ...state.results.flatMap((r) => Object.keys(r.data || {})),
+      ...allDataKeys.filter(k => !k.endsWith('__raw')),
     ]),
   ];
   // Delta fields = fields that actually have changes in loaded results
@@ -1460,17 +1756,45 @@ const openExportFieldsModal = () => {
     const alias = config.labels?.[key] || key;
     const ftype = config.fieldTypes?.[key] || "text";
     const isAggr = (config.aggregateFields || []).includes(key);
-    return `<div class="export-field-row" data-field="${escHtml(key)}" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
-      <input type="checkbox" ${checked ? "checked" : ""} style="flex:0 0 16px" />
-      <span style="flex:0 0 160px;font-size:13px;font-weight:600">${escHtml(key)}</span>
-      <input type="text" class="form-control ef-label" value="${escHtml(alias)}" placeholder="${escHtml(key)}" style="flex:1;min-width:80px" />
-      <select class="form-control ef-type" style="flex:0 0 90px">
-        <option value="text" ${ftype === "text" ? "selected" : ""}>Текст</option>
-        <option value="numeric" ${ftype === "numeric" ? "selected" : ""}>Число</option>
-      </select>
-      <label style="flex:0 0 80px;font-size:12px;display:flex;align-items:center;gap:4px">
-        <input type="checkbox" class="ef-aggr" ${isAggr ? "checked" : ""} /> Сума
-      </label>
+    const isRawBacked = rawBackedCols.has(key);
+    const hasActualRaw = hasRawInData.has(key); // can actually re-format now
+    // Default format: from saved export config, then from task config, then 'join'
+    const savedJcfg = (config.jsonConfig || []).find(c => c.column === key) || {};
+    const taskJcfg  = taskJsonColsMap.get(key) || {};
+    const jfmt = savedJcfg.format || taskJcfg.format || 'join';
+    const isTpl = jfmt === 'template';
+    const hasSep = jfmt !== 'first' && jfmt !== 'count' && jfmt !== 'json';
+    const jsonRow = isRawBacked ? `
+      <div class="ef-json-row" data-col="${escHtml(key)}" style="padding:3px 0 5px 22px;display:flex;gap:4px;align-items:center;flex-wrap:nowrap;background:var(--bg-2,#f8fafc);border-radius:0 0 4px 4px;margin:0 0 6px">
+        <span style="font-size:10px;color:var(--primary);font-weight:600;white-space:nowrap">⬡ JSON</span>
+        <select class="form-control ef-json-format" style="font-size:11px;width:140px;flex-shrink:0"
+                onchange="(()=>{const p=this.closest('.ef-json-row');const v=this.value;p.querySelector('.ef-json-tpl').style.display=v==='template'?'':'none';p.querySelector('.ef-json-sep').style.display=(v!=='first'&&v!=='count'&&v!=='json')?'':'none'})()">
+          <option value="join"     ${jfmt==='join'    ?'selected':''}>через роздільник</option>
+          <option value="template" ${jfmt==='template'?'selected':''}>шаблон {поле}</option>
+          <option value="first"    ${jfmt==='first'   ?'selected':''}>перший елемент</option>
+          <option value="count"    ${jfmt==='count'   ?'selected':''}>кількість</option>
+          <option value="json"     ${jfmt==='json'    ?'selected':''}>JSON масив</option>
+        </select>
+        <input class="form-control ef-json-tpl" style="font-size:11px;font-family:monospace;flex:1;min-width:100px;display:${isTpl?'':'none'}"
+               placeholder="{brand_name} ({industrial_code})" value="${escHtml(savedJcfg.template || taskJcfg.template ||'')}">
+        <input class="form-control ef-json-sep" style="font-size:11px;font-family:monospace;width:60px;display:${hasSep?'':'none'}"
+               placeholder="${isTpl?' | ':', '}" value="${escHtml(savedJcfg.separator || taskJcfg.separator ||'')}">
+        ${!hasActualRaw ? `<span style="font-size:10px;color:var(--warning,#d97706);white-space:nowrap"
+              title="Запустіть парсер повторно щоб застосувати зміни формату до поточних записів">⚠ потребує перезапуску</span>` : ''}
+      </div>` : '';
+    return `<div class="export-field-row" data-field="${escHtml(key)}" style="margin-bottom:${isRawBacked?'0':'6px'}">
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="checkbox" ${checked ? "checked" : ""} style="flex:0 0 16px" />
+        <span style="flex:0 0 160px;font-size:13px;font-weight:600">${escHtml(key)}${isRawBacked?' <span title="Поле з JSON масиву" style="font-size:10px;color:var(--primary);margin-left:3px">⬡</span>':''}</span>
+        <input type="text" class="form-control ef-label" value="${escHtml(alias)}" placeholder="${escHtml(key)}" style="flex:1;min-width:80px" />
+        <select class="form-control ef-type" style="flex:0 0 90px">
+          <option value="text" ${ftype === "text" ? "selected" : ""}>Текст</option>
+          <option value="numeric" ${ftype === "numeric" ? "selected" : ""}>Число</option>
+        </select>
+        <label style="flex:0 0 80px;font-size:12px;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" class="ef-aggr" ${isAggr ? "checked" : ""} /> Сума
+        </label>
+      </div>${jsonRow}
     </div>`;
   }).join("");
   const isDelta = config.mode === "delta";
@@ -1512,7 +1836,7 @@ const openExportFieldsModal = () => {
 
 const applyExportFieldConfig = () => {
   const rows = Array.from(document.querySelectorAll("#export-fields-list .export-field-row"));
-  const selected = [], labels = {}, fieldTypes = {}, aggregateFields = [];
+  const selected = [], labels = {}, fieldTypes = {}, aggregateFields = [], jsonConfig = [];
   rows.forEach((row) => {
     const key = row.dataset.field;
     if (!key) return;
@@ -1525,6 +1849,14 @@ const applyExportFieldConfig = () => {
     if (alias && alias !== key) labels[key] = alias;
     if (typeSelect?.value && typeSelect.value !== "text") fieldTypes[key] = typeSelect.value;
     if (aggrCb?.checked) aggregateFields.push(key);
+    // Collect JSON format config for raw-backed columns
+    const jsonRow = row.querySelector(".ef-json-row");
+    if (jsonRow) {
+      const fmt    = jsonRow.querySelector(".ef-json-format")?.value || "join";
+      const tpl    = jsonRow.querySelector(".ef-json-tpl")?.value?.trim() || null;
+      const sep    = jsonRow.querySelector(".ef-json-sep")?.value || null;
+      jsonConfig.push({ column: key, format: fmt, template: tpl || null, separator: sep || null });
+    }
   });
   const fieldKeys = rows.map((r) => r.dataset.field).filter(Boolean);
   if (!selected.length) selected.push(...fieldKeys);
@@ -1536,7 +1868,7 @@ const applyExportFieldConfig = () => {
   const dateFrom = document.getElementById("ef-date-from")?.value || null;
   const dateTo = document.getElementById("ef-date-to")?.value || null;
   saveExportFieldConfig({ fields: selected, labels, fieldTypes, uniqueField: uniqueField || null, aggregateFields,
-    mode: isDelta ? "delta" : null, deltaFields, dateFrom, dateTo });
+    mode: isDelta ? "delta" : null, deltaFields, dateFrom, dateTo, jsonConfig });
   UI.toast("Налаштування полів збережено", "success");
   document.getElementById("export-fields-modal").classList.remove("open");
 };
@@ -1554,6 +1886,7 @@ const getExportParams = () => {
   if (config.deltaFields?.length) params.deltaFields = config.deltaFields;
   if (config.dateFrom) params.dateFrom = config.dateFrom;
   if (config.dateTo) params.dateTo = config.dateTo;
+  if (config.jsonConfig?.length) params.jsonConfig = JSON.stringify(config.jsonConfig);
   const filters = getResultsFilters();
   if (filters.status) params.status = filters.status;
   if (filters.changed) params.changed = filters.changed;
@@ -1768,6 +2101,7 @@ const loadResults = async () => {
     const selectedRunId = filters.runId || "";
 
     state.results = items;
+    state.currentTask = task;
     const visibleItems = filterResultsItems(items, filters.search);
 
     document.getElementById("results-task-name").textContent = task.name;
@@ -2095,6 +2429,35 @@ const LiveMonitor = (() => {
         const row = document.getElementById(detailRowId(ev));
         if (!row) break;
         row.innerHTML = `<span>↳</span><span style="flex:1;word-break:break-all">${escHtml(trimUrl(ev.url))}</span><span class="badge badge-danger">✗</span><span style="color:var(--danger);font-size:11px">${escHtml(ev.error || "")}</span>`;
+        break;
+      }
+
+      case "follow:start": {
+        const rowId = `fw-${(ev.runId||'').slice(0,6)}-${ev.field}-${ev.index}`;
+        appendLine(`<div id="${rowId}" style="display:flex;gap:8px;align-items:baseline;padding-left:20px;border-left:2px solid var(--primary,#2563eb);margin-left:10px;font-size:12px;color:var(--text-2)">
+          <span style="color:var(--primary)">⤷</span>
+          <span style="color:var(--primary);font-weight:600">${escHtml(ev.field)}</span>
+          <span style="flex:1;word-break:break-all">${escHtml(trimUrl(ev.url))}</span>
+          <span class="badge">…</span>
+        </div>`);
+        break;
+      }
+
+      case "follow:done": {
+        const rowId = `fw-${(ev.runId||'').slice(0,6)}-${ev.field}-${ev.index}`;
+        const row = document.getElementById(rowId);
+        const previewStr = previewText(ev.preview);
+        const html = `<span style="color:var(--primary)">⤷</span><span style="color:var(--primary);font-weight:600">${escHtml(ev.field)}</span><span style="flex:1;word-break:break-all">${escHtml(trimUrl(ev.url))}</span><span class="badge badge-success">✓</span>${previewStr ? `<span style="color:var(--text-2);font-size:11px">${escHtml(previewStr)}</span>` : ''}`;
+        if (row) { row.style.display = 'flex'; row.style.gap = '8px'; row.style.alignItems = 'baseline'; row.innerHTML = html; }
+        break;
+      }
+
+      case "follow:error": {
+        const rowId = `fw-${(ev.runId||'').slice(0,6)}-${ev.field}-${ev.index}`;
+        const row = document.getElementById(rowId);
+        const html = `<span style="color:var(--primary)">⤷</span><span style="color:var(--primary);font-weight:600">${escHtml(ev.field)}</span><span style="flex:1;word-break:break-all">${escHtml(trimUrl(ev.url))}</span><span class="badge badge-danger">✗</span><span style="color:var(--danger);font-size:11px">${escHtml(ev.error||'')}</span>`;
+        if (row) row.innerHTML = html;
+        else appendLine(`<span style="color:var(--danger)">⤷ [${escHtml(ev.field)}] ${escHtml(ev.error||'')}</span>`);
         break;
       }
 
@@ -3035,9 +3398,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
+  // Mobile sidebar toggle
+  document.getElementById("mobile-nav-toggle")?.addEventListener("click", () => {
+    document.body.classList.toggle("sidebar-open");
+  });
+  document.getElementById("sidebar")?.addEventListener("click", (e) => {
+    if (window.innerWidth <= 960 && e.target.closest(".nav-item")) {
+      document.body.classList.remove("sidebar-open");
+    }
+  });
+
   // Task modal
   document
     .getElementById("btn-new-task")
+    ?.addEventListener("click", () => openTaskModal());
+  document
+    .getElementById("btn-new-task-quick")
     ?.addEventListener("click", () => openTaskModal());
   document
     .getElementById("btn-close-task-modal")
@@ -3076,6 +3452,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     .getElementById("tf-pagination-type")
     ?.addEventListener("change", updatePaginationOffsetRow);
   updatePaginationOffsetRow();
+  // Коли JSON path змінюється — перемальовуємо поля щоб оновити placeholders
+  document.getElementById("tf-json-path")?.addEventListener("input", () => {
+    if (state.fields.length > 0) renderFieldRows();
+  });
+
   document
     .getElementById("tf-crawl-enabled")
     ?.addEventListener("change", (e) => {
@@ -3376,6 +3757,63 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Tabs
   initTabs();
 
+  // Simple / Advanced mode switch inside task modal
+  document.getElementById("task-mode-switch")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-task-mode]");
+    if (!btn) return;
+    const mode = btn.dataset.taskMode;
+    const modal = document.getElementById("task-modal");
+    if (!modal) return;
+    const isSimple = mode === "simple";
+    modal.classList.toggle("task-simple-mode", isSimple);
+    document.querySelectorAll("#task-mode-switch [data-task-mode]").forEach((b) => {
+      b.className = b === btn ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm";
+    });
+    // If switching to simple and a hidden tab is active, move to basic
+    if (isSimple) {
+      const hiddenTabs = ["requests", "details", "advanced"];
+      const activeTab = modal.querySelector(".tab.active[data-tab-group='task']");
+      if (activeTab && hiddenTabs.includes(activeTab.dataset.tab)) {
+        modal.querySelector("[data-tab='basic'][data-tab-group='task']")?.click();
+      }
+    }
+  });
+
+  // Preset buttons — pre-fill field names for common scraping scenarios
+  const PRESETS = {
+    catalog: [
+      { name: "name",  selector: "", attr: null, transform: "trim" },
+      { name: "price", selector: "", attr: null, transform: "trim" },
+      { name: "link",  selector: "a", attr: "href", transform: null },
+      { name: "image", selector: "img", attr: "src", transform: null },
+    ],
+    news: [
+      { name: "title",       selector: "", attr: null, transform: "trim" },
+      { name: "date",        selector: "", attr: null, transform: "trim" },
+      { name: "description", selector: "", attr: null, transform: "trim" },
+      { name: "link",        selector: "a", attr: "href", transform: null },
+    ],
+    directory: [
+      { name: "name",    selector: "", attr: null, transform: "trim" },
+      { name: "address", selector: "", attr: null, transform: "trim" },
+      { name: "phone",   selector: "", attr: null, transform: "trim" },
+      { name: "email",   selector: "", attr: null, transform: "trim" },
+      { name: "website", selector: "a", attr: "href", transform: null },
+    ],
+  };
+  document.querySelector(".setup-presets")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-preset]");
+    if (!btn) return;
+    const preset = PRESETS[btn.dataset.preset];
+    if (!preset) return;
+    state.fields = preset.map((f) => ({ ...f, type: "text", jsonPath: null, jsonFormat: null }));
+    renderFieldRows();
+    document.querySelectorAll(".setup-preset").forEach((b) => {
+      b.classList.toggle("active", b === btn);
+    });
+    document.querySelector("[data-tab='selectors'][data-tab-group='task']")?.click();
+  });
+
   // Check auth and navigate
   await Auth.init();
   if (API.getToken()) navigate("dashboard");
@@ -3499,10 +3937,11 @@ Object.assign(window, {
   editTask,
   viewResults,
   showRunLog,
-  updateField,
-  removeField,
+  updateFieldAtPath,
+  removeFieldAtPath,
   addField,
-  openSelectorPicker,
+  addSubFieldAtPath,
+  openSelectorPickerAtPath,
   updateRequest,
   removeRequest,
   addRequest,

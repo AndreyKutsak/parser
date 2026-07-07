@@ -868,6 +868,9 @@
             <div class="tab" data-tab="advanced" data-tab-group="task">
               Додатково
             </div>
+            <div class="tab" data-tab="rules" data-tab-group="task">
+              Правила
+            </div>
           </div>
 
           <!-- Основне -->
@@ -1366,6 +1369,27 @@
                   value="1000"
                 />
               </div>
+              <div class="form-group">
+                <label class="form-label">Затримка між follow-запитами (мс)</label>
+                <input
+                  id="tf-follow-delay"
+                  type="number"
+                  class="form-control"
+                  value="0"
+                  placeholder="0 = без затримки"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Паралельних follow-запитів</label>
+                <input
+                  id="tf-detail-concurrency"
+                  type="number"
+                  class="form-control"
+                  value="3"
+                  min="1"
+                  max="20"
+                />
+              </div>
             </div>
             <div class="form-group">
               <label
@@ -1639,6 +1663,16 @@
                 </p>
               </div>
             </div>
+          </div>
+
+          <!-- Правила обробки записів -->
+          <div data-pane="rules" data-tab-group="task" class="tab-pane">
+            <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">
+              Правила застосовуються до кожного зібраного запису після парсингу.
+              Умови перевіряються по черзі. При збігу — виконується дія.
+            </p>
+            <div id="task-rules-list"></div>
+            <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addTaskRule()">+ Додати правило</button>
           </div>
         </div>
         <div class="modal-footer">

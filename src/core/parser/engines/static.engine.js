@@ -16,6 +16,7 @@ const { HttpsProxyAgent } = require('https-proxy-agent');
 const { HttpProxyAgent } = require('http-proxy-agent');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { buildHeaders } = require('../../../utils/anti-bot');
+const { resolveJsonPath, flattenJsonItem } = require('../../../utils/json-utils');
 const logger = require('../../../utils/logger');
 
 // Persistent keep-alive pools for direct (non-proxy) requests — avoids TCP+TLS handshake on every page
@@ -173,19 +174,32 @@ const fetchPage = async (url, options = {}) => {
   logger.debug('Статичний запит', { url, method, status: response.status, duration });
 
   let htmlContent = response.data;
+  let rawJsonItems = null; // повертається для прямого JSON-режиму
 
   if (jsonPath) {
     try {
       const json = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-      const arr = jsonPath.split('.').reduce((obj, key) => obj?.[key], json);
-      const items = Array.isArray(arr) ? arr : (arr && typeof arr === 'object' ? [arr] : []);
+
+      // Підтримка кореневого масиву: jsonPath = "." або "" або "$"
+      let items;
+      const trimmedPath = (jsonPath || '').trim();
+      if (!trimmedPath || trimmedPath === '.' || trimmedPath === '$') {
+        items = Array.isArray(json) ? json : [json];
+      } else {
+        const resolved = resolveJsonPath(json, trimmedPath);
+        items = Array.isArray(resolved) ? resolved : (resolved != null ? [resolved] : []);
+      }
+
+      rawJsonItems = items; // для прямого JSON-режиму (без itemSelector)
+
+      // HTML bridge: розгортаємо вкладені об'єкти з underscore-ключами для CSS
       const sc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const toClass = (name) => String(name).replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^(\d)/, '_$1');
       htmlContent = '<div id="json-root">' + items.map((item) => {
-        const spans = Object.entries(item).map(([k, v]) => {
-          const val = typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
-          return `<span class="${toClass(k)}">${sc(val)}</span>`;
-        }).join('');
+        const flat = flattenJsonItem(typeof item === 'object' && item !== null ? item : { value: item });
+        const spans = Object.entries(flat).map(([k, v]) =>
+          `<span class="${toClass(k)}">${sc(v)}</span>`
+        ).join('');
         return `<div class="json-item">${spans}</div>`;
       }).join('') + '</div>';
     } catch { /* не JSON — парсимо як HTML */ }
@@ -197,7 +211,7 @@ const fetchPage = async (url, options = {}) => {
   }
 
   const $ = cheerio.load(htmlContent, { decodeEntities: true });
-  return { $, status: response.status, duration };
+  return { $, status: response.status, duration, rawJsonItems };
 };
 
 module.exports = { fetchPage };
