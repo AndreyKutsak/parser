@@ -17,6 +17,27 @@ const getCachedRegex = (pattern) => {
   return re;
 };
 
+// Окремий кеш для boolean-полів — завжди case-insensitive, на відміну від regex: transform
+const boolRegexCache = new Map();
+const getCachedBoolRegex = (pattern) => {
+  let re = boolRegexCache.get(pattern);
+  if (!re) { re = new RegExp(pattern, 'i'); boolRegexCache.set(pattern, re); }
+  return re;
+};
+
+/**
+ * Перевіряє, чи значення відповідає регулярному виразу — для полів type: 'boolean' + pattern.
+ * Порівняння регістронезалежне. Некоректний pattern або порожнє значення -> false.
+ */
+const testPattern = (value, pattern) => {
+  if (!value || !pattern) return false;
+  try {
+    return getCachedBoolRegex(pattern).test(String(value));
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Apply transformation rules to a scraped string value
  * Supported transforms: trim, lowercase, uppercase, number, int, boolean, regex:<pattern>:<group>
@@ -120,4 +141,4 @@ const formatDuration = (ms) => {
   return `${(ms / 60000).toFixed(1)}m`;
 };
 
-module.exports = { sleep, applyTransform, resolveUrl, chunk, deepMerge, safeJson, formatDuration };
+module.exports = { sleep, applyTransform, testPattern, resolveUrl, chunk, deepMerge, safeJson, formatDuration };

@@ -8,7 +8,7 @@
  *   - Ланцюжок трансформацій значень (trim, uppercase, тощо)
  *   - Збір одного або всіх збігів
  */
-const { applyTransform, resolveUrl } = require('../../utils/helpers');
+const { applyTransform, testPattern, resolveUrl } = require('../../utils/helpers');
 
 // Lazy-load xpath deps once at module level (not inside the hot path)
 let xpathLib = null;
@@ -33,11 +33,13 @@ const xpathDocCache = new WeakMap();
  * @param {string}     [field.attr]       - Атрибут для читання (null = текстовий вміст)
  * @param {*}          [field.transform]  - Трансформація або масив трансформацій
  * @param {boolean}    [field.multiple]   - true = повернути масив усіх збігів
+ * @param {string}     [field.type]       - Семантичний тип; 'boolean' + pattern -> true/false замість тексту
+ * @param {string}     [field.pattern]    - Regex; використовується лише коли type === 'boolean'
  * @param {string}     [baseUrl='']       - Базовий URL для розгортання відносних посилань
- * @returns {string|string[]|null} Витягнуте значення або null
+ * @returns {string|string[]|boolean|null} Витягнуте значення, true/false (для type: 'boolean') або null
  */
 const extractField = ($, el, field, baseUrl = '') => {
-  const { selector, selectorType = 'css', attr = null, transform = null, multiple = false, type = null, subSelectors = null } = field;
+  const { selector, selectorType = 'css', attr = null, transform = null, multiple = false, type = null, subSelectors = null, pattern = null } = field;
 
   let elements;
   if (!selector || !String(selector).trim()) {
@@ -74,6 +76,12 @@ const extractField = ($, el, field, baseUrl = '') => {
     } else {
       value = $(elem).text().trim() || null;
     }
+
+    // type: 'boolean' + pattern -> true/false залежно від збігу з regex, без transform-ланцюжка
+    if (type === 'boolean' && pattern) {
+      return testPattern(value, pattern);
+    }
+
     return applyTransform(value, transform);
   };
 

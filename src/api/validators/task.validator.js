@@ -11,6 +11,7 @@ const fieldSchema = Joi.object({
   multiple: Joi.boolean().default(false),
   monitor: Joi.boolean().default(false),
   type: Joi.string().allow("", null).default(null),
+  pattern: Joi.string().allow("", null).default(null),
   follow: Joi.boolean().default(false),
   urlTemplate: Joi.string().allow("", null).default(null),
   subJsonPath: Joi.string().allow("", null).default(null),

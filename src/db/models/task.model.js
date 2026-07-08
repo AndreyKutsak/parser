@@ -20,7 +20,8 @@ const mongoose = require("mongoose");
  * @property {*}       transform    - Трансформації (trim, number, тощо)
  * @property {boolean} multiple     - Зібрати всі збіги
  * @property {boolean} monitor      - Відстежувати зміни
- * @property {string}  type         - Семантичний тип (назва, ціна, лінк на іншу сторінку, …)
+ * @property {string}  type         - Семантичний тип (назва, ціна, лінк на іншу сторінку, boolean, …)
+ * @property {string}  pattern      - Regex для type: 'boolean' — true, якщо текст поля йому відповідає
  * @property {boolean} follow       - Переходити за посиланням і збирати підселектори
  * @property {string}  urlTemplate  - Шаблон URL з {{поле}} — генерувати на льоту
  * @property {string}  subJsonPath  - Крапковий шлях до об'єкта в JSON-відповіді
@@ -35,6 +36,7 @@ const fieldSchema = new mongoose.Schema(
     multiple:     { type: Boolean, default: false },
     monitor:      { type: Boolean, default: false },
     type:         { type: String, default: null },
+    pattern:      { type: String, default: null },
     follow:       { type: Boolean, default: false },
     urlTemplate:  { type: String, default: null },
     subJsonPath:  { type: String, default: null },
