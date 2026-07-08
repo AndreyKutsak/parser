@@ -2961,7 +2961,8 @@ const importProxies = async () => {
       username,
       password,
     });
-    UI.toast(`Імпортовано ${result.imported} проксі`, "success");
+    const skippedMsg = result.skipped ? `, пропущено дублів: ${result.skipped}` : "";
+    UI.toast(`Імпортовано ${result.imported} проксі${skippedMsg}`, "success");
     document.getElementById("proxy-modal").classList.remove("open");
     loadProxies();
   } catch (err) {

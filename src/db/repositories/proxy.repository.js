@@ -98,6 +98,11 @@ class ProxyRepository {
   async getActiveCount() {
     return Proxy.countDocuments({ status: "active" });
   }
+
+  /** Оновити lastUsed для round-robin ротації, не чіпаючи статус/лічильник помилок */
+  async touchLastUsed(id) {
+    return Proxy.findByIdAndUpdate(id, { $set: { lastUsed: new Date() } });
+  }
 }
 
 module.exports = new ProxyRepository();

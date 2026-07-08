@@ -29,8 +29,9 @@ class ProxyManager {
     const proxy = this._activeProxies[this._index % this._activeProxies.length];
     this._index++;
 
-    // Update lastUsed asynchronously (don't block)
-    proxyRepo.recordSuccess(proxy._id, 0).catch(() => {});
+    // Update lastUsed asynchronously (don't block). Must NOT touch status/failCount —
+    // this proxy hasn't actually been used yet, so it shouldn't look "verified healthy".
+    proxyRepo.touchLastUsed(proxy._id).catch(() => {});
 
     return proxy;
   }
@@ -74,19 +75,48 @@ class ProxyManager {
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean);
+
     const parsed = [];
+    const seen = new Set();
+    let skipped = 0;
 
     for (const line of lines) {
       const proxy = this._parseLine(line, defaults);
-      if (proxy) parsed.push(proxy);
+      if (!proxy || !proxy.host || !proxy.port) {
+        skipped++;
+        continue;
+      }
+      const key = this._proxyKey(proxy);
+      if (seen.has(key)) {
+        skipped++;
+        continue;
+      }
+      seen.add(key);
+      parsed.push(proxy);
     }
 
-    if (!parsed.length) return { imported: 0 };
+    if (!parsed.length) return { imported: 0, skipped };
 
-    await proxyRepo.bulkCreate(parsed);
+    // Точний дедуп проти вже наявних у БД (host+port+protocol+username)
+    const { items: existing } = await proxyRepo.findAll({ limit: 100000 });
+    const existingKeys = new Set(existing.map((p) => this._proxyKey(p)));
+    const toCreate = parsed.filter((p) => !existingKeys.has(this._proxyKey(p)));
+    skipped += parsed.length - toCreate.length;
+
+    if (!toCreate.length) return { imported: 0, skipped };
+
+    await proxyRepo.bulkCreate(toCreate);
     this._invalidateCache();
-    logger.info(`Imported ${parsed.length} proxies`);
-    return { imported: parsed.length };
+    logger.info(`Imported ${toCreate.length} proxies, skipped ${skipped} duplicates`);
+    return { imported: toCreate.length, skipped };
+  }
+
+  /** Ключ точного збігу проксі для дедупу: host+port+protocol+username */
+  _proxyKey(p) {
+    const host = String(p.host || "").trim().toLowerCase();
+    const protocol = String(p.protocol || "http").trim().toLowerCase();
+    const username = String(p.username || "").trim();
+    return `${host}:${p.port}:${protocol}:${username}`;
   }
 
   _parseLine(line, defaults = {}) {

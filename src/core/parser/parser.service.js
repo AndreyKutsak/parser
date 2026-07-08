@@ -383,10 +383,16 @@ class ParserService {
           // ── Цикл повторних спроб ────────────────────────────────────────
           for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-              let { $, status, rawJsonItems } = await engine.fetchPage(
-                currentUrl,
-                fetchOptions,
-              );
+              let fetchResult;
+              try {
+                fetchResult = await engine.fetchPage(currentUrl, fetchOptions);
+              } catch (fetchErr) {
+                // Позначаємо, що це саме помилка запиту (мережа/проксі),
+                // щоб нижче не карати проксі за помилки в селекторах/парсингу.
+                fetchErr.isFetchError = true;
+                throw fetchErr;
+              }
+              let { $, status, rawJsonItems } = fetchResult;
               emit(task._id, {
                 type: "page:fetch",
                 runId,
@@ -698,8 +704,9 @@ class ParserService {
                 error: err.message,
               });
 
-              // Помічаємо проксі як несправний при помилці
-              if (reqProxy && task.proxy?.rotate) {
+              // Помічаємо проксі як несправний лише якщо впав саме запит
+              // (мережа/проксі), а не парсинг/селектори на вже отриманій сторінці
+              if (reqProxy && task.proxy?.rotate && err.isFetchError) {
                 await proxyManager.recordFailure(reqProxy._id);
                 reqProxy = await proxyManager.getNextProxy();
                 fetchOptions.proxy = reqProxy;
