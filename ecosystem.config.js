@@ -24,7 +24,14 @@ module.exports = {
       min_uptime: '10s',
       max_restarts: 20,
       kill_timeout: 35000, // worker needs 30s for graceful job drain + 5s buffer
-      env: { NODE_ENV: 'production' },
+      // Host has ~2GB RAM total — lower concurrency instead of raising the heap cap
+      // (was 5/2, hit JS heap OOM under load). Puppeteer/Chromium is the heaviest
+      // per-job consumer, so dynamic concurrency is capped at 1.
+      env: {
+        NODE_ENV: 'production',
+        MAX_CONCURRENT_TASKS: '3',
+        MAX_CONCURRENT_DYNAMIC_TASKS: '1',
+      },
     },
   ],
 };

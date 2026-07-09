@@ -19,6 +19,10 @@ function createApp() {
   const app = express();
   const frontendPath = path.join(__dirname, "../../frontend");
 
+  // Trust the first proxy hop (nginx) so req.ip / X-Forwarded-For are read correctly
+  // by express-rate-limit — required in production, harmless locally without a proxy.
+  app.set("trust proxy", 1);
+
   app.use(
     helmet({
       contentSecurityPolicy: {
