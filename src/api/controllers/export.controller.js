@@ -30,6 +30,15 @@ const parseFieldTypes = (value) => {
 const parseArray = (value) =>
   Array.isArray(value) ? value : value ? [value] : [];
 
+const paginationHeaders = (meta) => {
+  const headers = { "X-Total-Count": String(meta.total) };
+  if (meta.page) {
+    headers["X-Page"] = String(meta.page);
+    headers["X-Total-Pages"] = String(meta.pages);
+  }
+  return headers;
+};
+
 const parseJsonConfig = (value) => {
   if (!value) return null;
   try {
@@ -49,6 +58,8 @@ const parseExportParams = (query) => ({
   dateFrom: query.dateFrom || null,
   dateTo: query.dateTo || null,
   jsonConfig: parseJsonConfig(query.jsonConfig),
+  page: query.page ? Math.max(1, parseInt(query.page) || 1) : null,
+  limit: query.limit ? Math.min(Math.max(1, parseInt(query.limit) || 100), 1000) : null,
   filters: {
     status: query.status,
     changed: query.changed,
@@ -78,9 +89,17 @@ const parseExportParams = (query) => ({
  *         schema:
  *           type: string
  *         description: ID запуску для експорту (опціонально, експортує всі якщо не вказано)
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *         description: Номер сторінки (якщо не вказано — повертає весь датасет одним запитом)
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100, maximum: 1000 }
+ *         description: Кількість записів на сторінку
  *     responses:
  *       200:
- *         description: JSON файл з даними
+ *         description: JSON файл з даними. Метадані пагінації — у заголовках X-Total-Count, X-Page, X-Total-Pages
  *         content:
  *           application/json:
  *             schema:
@@ -92,7 +111,7 @@ exports.json = async (req, res, next) => {
     const task = await getTaskOrFail(req.params.taskId, res);
     if (!task) return;
     const p = parseExportParams(req.query);
-    const data = await exporterService.toJson(String(task._id), {
+    const { data, meta } = await exporterService.toJson(String(task._id), {
       runId: req.query.runId,
       keyField: task.selectors?.keyField || null,
       ...p,
@@ -106,6 +125,7 @@ exports.json = async (req, res, next) => {
       .set({
         "Content-Type": "application/json",
         "Content-Disposition": createContentDisposition(filename, "json"),
+        ...paginationHeaders(meta),
       })
       .send(data);
   } catch (err) {
@@ -133,9 +153,17 @@ exports.json = async (req, res, next) => {
  *         schema:
  *           type: string
  *         description: ID запуску для експорту (опціонально)
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *         description: Номер сторінки (якщо не вказано — повертає весь датасет одним запитом)
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100, maximum: 1000 }
+ *         description: Кількість записів на сторінку
  *     responses:
  *       200:
- *         description: CSV файл з даними
+ *         description: CSV файл з даними. Метадані пагінації — у заголовках X-Total-Count, X-Page, X-Total-Pages
  *         content:
  *           text/csv:
  *             schema:
@@ -146,7 +174,7 @@ exports.csv = async (req, res, next) => {
     const task = await getTaskOrFail(req.params.taskId, res);
     if (!task) return;
     const p = parseExportParams(req.query);
-    const data = await exporterService.toCsv(String(task._id), {
+    const { data, meta } = await exporterService.toCsv(String(task._id), {
       runId: req.query.runId,
       keyField: task.selectors?.keyField || null,
       ...p,
@@ -160,6 +188,7 @@ exports.csv = async (req, res, next) => {
       .set({
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": createContentDisposition(filename, "csv"),
+        ...paginationHeaders(meta),
       })
       .send("\uFEFF" + data); // BOM for Excel UTF-8 compatibility
   } catch (err) {
@@ -187,9 +216,17 @@ exports.csv = async (req, res, next) => {
  *         schema:
  *           type: string
  *         description: ID запуску для експорту (опціонально)
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *         description: Номер сторінки (якщо не вказано — повертає весь датасет одним запитом)
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100, maximum: 1000 }
+ *         description: Кількість записів на сторінку
  *     responses:
  *       200:
- *         description: Excel файл з даними
+ *         description: Excel файл з даними. Метадані пагінації — у заголовках X-Total-Count, X-Page, X-Total-Pages
  *         content:
  *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
  *             schema:
@@ -232,7 +269,7 @@ exports.txt = async (req, res, next) => {
     const task = await getTaskOrFail(req.params.taskId, res);
     if (!task) return;
     const p = parseExportParams(req.query);
-    const data = await exporterService.toTxt(String(task._id), {
+    const { data, meta } = await exporterService.toTxt(String(task._id), {
       runId: req.query.runId,
       fieldSep: unescape(req.query.fieldSep ?? "\t"),
       recordSep: unescape(req.query.recordSep ?? "\n"),
@@ -250,6 +287,7 @@ exports.txt = async (req, res, next) => {
       .set({
         "Content-Type": "text/plain; charset=utf-8",
         "Content-Disposition": createContentDisposition(filename, "txt"),
+        ...paginationHeaders(meta),
       })
       .send("\uFEFF" + data);
   } catch (err) {
@@ -378,9 +416,17 @@ exports.domainFields = async (req, res, next) => {
  *         name: dateTo
  *         schema: { type: string, format: date }
  *         description: Кінець delta-діапазону (YYYY-MM-DD)
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *         description: Номер сторінки (якщо не вказано — повертає весь датасет одним запитом)
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100, maximum: 1000 }
+ *         description: Кількість записів на сторінку
  *     responses:
  *       200:
- *         description: Файл вивантаження (JSON / CSV / Excel / TXT)
+ *         description: Файл вивантаження (JSON / CSV / Excel / TXT). Метадані пагінації — у заголовках X-Total-Count, X-Page, X-Total-Pages
  *         content:
  *           application/json:
  *             schema: { type: array, items: { type: object } }
@@ -408,19 +454,19 @@ exports.byDomain = async (req, res, next) => {
     };
     const filename = sanitize(domain);
     if (format === "csv") {
-      const data = await exporterService.domainToCsv(domain, opts);
-      return res.set({ "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": createContentDisposition(filename, "csv") }).send("\uFEFF" + data);
+      const { data, meta } = await exporterService.domainToCsv(domain, opts);
+      return res.set({ "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": createContentDisposition(filename, "csv"), ...paginationHeaders(meta) }).send("\uFEFF" + data);
     }
     if (format === "excel") {
-      const buffer = await exporterService.domainToExcel(domain, opts);
-      return res.set({ "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": createContentDisposition(filename, "xlsx") }).send(buffer);
+      const { buffer, meta } = await exporterService.domainToExcel(domain, opts);
+      return res.set({ "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": createContentDisposition(filename, "xlsx"), ...paginationHeaders(meta) }).send(buffer);
     }
     if (format === "txt") {
-      const data = await exporterService.domainToTxt(domain, opts);
-      return res.set({ "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": createContentDisposition(filename, "txt") }).send("\uFEFF" + data);
+      const { data, meta } = await exporterService.domainToTxt(domain, opts);
+      return res.set({ "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": createContentDisposition(filename, "txt"), ...paginationHeaders(meta) }).send("\uFEFF" + data);
     }
-    const data = await exporterService.domainToJson(domain, opts);
-    res.set({ "Content-Type": "application/json", "Content-Disposition": createContentDisposition(filename, "json") }).send(data);
+    const { data, meta } = await exporterService.domainToJson(domain, opts);
+    res.set({ "Content-Type": "application/json", "Content-Disposition": createContentDisposition(filename, "json"), ...paginationHeaders(meta) }).send(data);
   } catch (err) {
     next(err);
   }

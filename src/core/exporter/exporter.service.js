@@ -33,6 +33,25 @@ class ExporterService {
     return rows;
   }
 
+  /** Slice already-built rows into a page. page=null → no pagination (return all). */
+  _paginate(rows, page, limit) {
+    const total = rows.length;
+    if (!page) return { rows, total, page: null, pages: null };
+    const perPage = limit || 100;
+    const pages = Math.max(1, Math.ceil(total / perPage));
+    const start = (page - 1) * perPage;
+    return { rows: rows.slice(start, start + perPage), total, page, pages };
+  }
+
+  _metaHeaders(meta) {
+    const headers = { "X-Total-Count": String(meta.total) };
+    if (meta.page) {
+      headers["X-Page"] = String(meta.page);
+      headers["X-Total-Pages"] = String(meta.pages);
+    }
+    return headers;
+  }
+
   // Re-format __raw columns at export time; hide raw cols from output
   _applyJsonConfig(rows, jsonConfig) {
     if (!rows.length) return rows;
@@ -65,13 +84,14 @@ class ExporterService {
     { runId, fields = [], fieldLabels = {}, filters = {}, keyField = null,
       fieldTypes = {}, uniqueField = null, aggregateFields = [],
       mode = null, deltaFields = [], dateFrom = null, dateTo = null,
-      jsonConfig = null } = {},
+      jsonConfig = null, page = null, limit = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
     const stMap = await this._loadSubTaskMap(taskId, records);
     const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
     const selected = this._applyFieldSelection(rows, fields, fieldLabels);
-    return JSON.stringify(selected.rows, null, 2);
+    const paged = this._paginate(selected.rows, page, limit);
+    return { data: JSON.stringify(paged.rows, null, 2), meta: paged };
   }
 
   async toCsv(
@@ -79,16 +99,17 @@ class ExporterService {
     { runId, fields = [], fieldLabels = {}, filters = {}, keyField = null,
       fieldTypes = {}, uniqueField = null, aggregateFields = [],
       mode = null, deltaFields = [], dateFrom = null, dateTo = null,
-      jsonConfig = null } = {},
+      jsonConfig = null, page = null, limit = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
-    if (!records.length) return "";
+    if (!records.length) return { data: "", meta: { total: 0, page, pages: page ? 1 : null } };
     const stMap = await this._loadSubTaskMap(taskId, records);
     const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
     const selected = this._applyFieldSelection(rows, fields, fieldLabels);
+    const paged = this._paginate(selected.rows, page, limit);
     try {
-      const parser = new Json2CsvParser({ fields: Object.keys(selected.rows[0] || {}) });
-      return parser.parse(selected.rows);
+      const parser = new Json2CsvParser({ fields: Object.keys(paged.rows[0] || {}) });
+      return { data: parser.parse(paged.rows), meta: paged };
     } catch (err) {
       logger.error("CSV export error", { error: err.message });
       throw new Error("CSV export failed: " + err.message);
@@ -100,7 +121,7 @@ class ExporterService {
     { runId, fields = [], fieldLabels = {}, filters = {}, taskName = "Results",
       keyField = null, fieldTypes = {}, uniqueField = null, aggregateFields = [],
       mode = null, deltaFields = [], dateFrom = null, dateTo = null,
-      stream = null, jsonConfig = null } = {},
+      stream = null, jsonConfig = null, page = null, limit = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
     const stMap = await this._loadSubTaskMap(taskId, records);
@@ -111,11 +132,14 @@ class ExporterService {
     const sheetName = mode === "delta" ? "Дельта"
       : (taskName.replace(/[*?:/\\[\]]/g, "-").slice(0, 28) || "Результати");
     const sheet1 = workbook.addWorksheet(sheetName);
+    let meta = { total: 0, page: null, pages: null };
     if (!records.length) {
       sheet1.addRow(["No data"]);
     } else {
       const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
-      this._fillSheet(sheet1, this._applyFieldSelection(rows, fields, fieldLabels).rows, "FF2563EB");
+      const paged = this._paginate(this._applyFieldSelection(rows, fields, fieldLabels).rows, page, limit);
+      meta = paged;
+      this._fillSheet(sheet1, paged.rows, "FF2563EB");
     }
 
     if (mode !== "delta") {
@@ -135,10 +159,11 @@ class ExporterService {
 
     // Stream directly to response if provided — avoids allocating a second in-memory buffer
     if (stream) {
+      if (typeof stream.set === "function") stream.set(this._metaHeaders(meta));
       await workbook.xlsx.write(stream);
       return null;
     }
-    return workbook.xlsx.writeBuffer();
+    return { buffer: await workbook.xlsx.writeBuffer(), meta };
   }
 
   async toTxt(
@@ -147,25 +172,29 @@ class ExporterService {
       includeHeader = true, fields = [], keyField = null,
       fieldTypes = {}, uniqueField = null, aggregateFields = [],
       mode = null, deltaFields = [], dateFrom = null, dateTo = null,
-      jsonConfig = null } = {},
+      jsonConfig = null, page = null, limit = null } = {},
   ) {
     const records = await this._loadRecords(taskId, runId, filters);
-    if (!records.length) return "";
+    if (!records.length) return { data: "", meta: { total: 0, page, pages: page ? 1 : null } };
     const stMap = await this._loadSubTaskMap(taskId, records);
     const rows = this._resolveRows(records, stMap, { keyField, fieldTypes, uniqueField, aggregateFields, mode, deltaFields, dateFrom, dateTo, jsonConfig });
     const selected = this._applyFieldSelection(rows, fields, {});
+    const paged = this._paginate(selected.rows, page, limit);
 
     const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
     if (template) {
-      return selected.rows
-        .map((row) => template.replace(/\{\{([^}]+)\}\}/g, (_, k) => clean(row[k])))
-        .join(recordSep);
+      return {
+        data: paged.rows
+          .map((row) => template.replace(/\{\{([^}]+)\}\}/g, (_, k) => clean(row[k])))
+          .join(recordSep),
+        meta: paged,
+      };
     }
     const keys = selected.keys;
     const lines = [];
     if (includeHeader) lines.push(keys.join(fieldSep));
-    for (const row of selected.rows) lines.push(keys.map((k) => clean(row[k])).join(fieldSep));
-    return lines.join(recordSep);
+    for (const row of paged.rows) lines.push(keys.map((k) => clean(row[k])).join(fieldSep));
+    return { data: lines.join(recordSep), meta: paged };
   }
 
   // ── Domain export ─────────────────────────────────────────────────────────
@@ -185,25 +214,27 @@ class ExporterService {
 
   async domainToJson(domain, opts = {}) {
     const { records, tasks } = await this._loadDomainRecords(domain, opts.runId, opts.filters || {});
-    if (!records.length) return "[]";
+    if (!records.length) return { data: "[]", meta: { total: 0, page: opts.page || null, pages: opts.page ? 1 : null } };
     const stMap = await this._buildDomainStMap(tasks, records);
     let rows = this._buildProductRows(records, stMap, opts.keyField || null);
     rows = this._applyNormalization(rows, opts.fieldTypes || {});
     rows = this._dedupAndAggregate(rows, opts.uniqueField || null, opts.aggregateFields || []);
     const selected = this._applyFieldSelection(rows, opts.fields || [], opts.fieldLabels || {});
-    return JSON.stringify(selected.rows, null, 2);
+    const paged = this._paginate(selected.rows, opts.page || null, opts.limit || null);
+    return { data: JSON.stringify(paged.rows, null, 2), meta: paged };
   }
 
   async domainToCsv(domain, opts = {}) {
     const { records, tasks } = await this._loadDomainRecords(domain, opts.runId, opts.filters || {});
-    if (!records.length) return "";
+    if (!records.length) return { data: "", meta: { total: 0, page: opts.page || null, pages: opts.page ? 1 : null } };
     const stMap = await this._buildDomainStMap(tasks, records);
     let rows = this._buildProductRows(records, stMap, opts.keyField || null);
     rows = this._applyNormalization(rows, opts.fieldTypes || {});
     rows = this._dedupAndAggregate(rows, opts.uniqueField || null, opts.aggregateFields || []);
     const selected = this._applyFieldSelection(rows, opts.fields || [], opts.fieldLabels || {});
-    const parser = new Json2CsvParser({ fields: Object.keys(selected.rows[0]) });
-    return parser.parse(selected.rows);
+    const paged = this._paginate(selected.rows, opts.page || null, opts.limit || null);
+    const parser = new Json2CsvParser({ fields: Object.keys(paged.rows[0] || {}) });
+    return { data: parser.parse(paged.rows), meta: paged };
   }
 
   async domainToExcel(domain, opts = {}) {
@@ -212,6 +243,7 @@ class ExporterService {
     workbook.creator = "Web Parser Pro";
     workbook.created = new Date();
     const sheet1 = workbook.addWorksheet(domain.replace(/[*?:/\\[\]]/g, "-").slice(0, 28) || "Домен");
+    let meta = { total: 0, page: null, pages: null };
     if (!records.length) {
       sheet1.addRow(["No data"]);
     } else {
@@ -219,31 +251,42 @@ class ExporterService {
       let rows = this._buildProductRows(records, stMap, opts.keyField || null);
       rows = this._applyNormalization(rows, opts.fieldTypes || {});
       rows = this._dedupAndAggregate(rows, opts.uniqueField || null, opts.aggregateFields || []);
-      this._fillSheet(sheet1, this._applyFieldSelection(rows, opts.fields || [], opts.fieldLabels || {}).rows, "FF2563EB");
+      const paged = this._paginate(this._applyFieldSelection(rows, opts.fields || [], opts.fieldLabels || {}).rows, opts.page || null, opts.limit || null);
+      meta = paged;
+      this._fillSheet(sheet1, paged.rows, "FF2563EB");
     }
-    return workbook.xlsx.writeBuffer();
+    if (opts.stream) {
+      if (typeof opts.stream.set === "function") opts.stream.set(this._metaHeaders(meta));
+      await workbook.xlsx.write(opts.stream);
+      return null;
+    }
+    return { buffer: await workbook.xlsx.writeBuffer(), meta };
   }
 
   async domainToTxt(domain, opts = {}) {
     const { records, tasks } = await this._loadDomainRecords(domain, opts.runId, opts.filters || {});
-    if (!records.length) return "";
+    if (!records.length) return { data: "", meta: { total: 0, page: opts.page || null, pages: opts.page ? 1 : null } };
     const stMap = await this._buildDomainStMap(tasks, records);
     let rows = this._buildProductRows(records, stMap, opts.keyField || null);
     rows = this._applyNormalization(rows, opts.fieldTypes || {});
     rows = this._dedupAndAggregate(rows, opts.uniqueField || null, opts.aggregateFields || []);
     const selected = this._applyFieldSelection(rows, opts.fields || [], {});
+    const paged = this._paginate(selected.rows, opts.page || null, opts.limit || null);
     const { fieldSep = "\t", recordSep = "\n", template = null, includeHeader = true } = opts;
     const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
     if (template) {
-      return selected.rows
-        .map((row) => template.replace(/\{\{([^}]+)\}\}/g, (_, k) => clean(row[k])))
-        .join(recordSep);
+      return {
+        data: paged.rows
+          .map((row) => template.replace(/\{\{([^}]+)\}\}/g, (_, k) => clean(row[k])))
+          .join(recordSep),
+        meta: paged,
+      };
     }
     const keys = selected.keys;
     const lines = [];
     if (includeHeader) lines.push(keys.join(fieldSep));
-    for (const row of selected.rows) lines.push(keys.map((k) => clean(row[k])).join(fieldSep));
-    return lines.join(recordSep);
+    for (const row of paged.rows) lines.push(keys.map((k) => clean(row[k])).join(fieldSep));
+    return { data: lines.join(recordSep), meta: paged };
   }
 
   async _buildDomainStMap(tasks, records) {

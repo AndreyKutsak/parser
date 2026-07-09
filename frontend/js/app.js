@@ -3236,8 +3236,8 @@ const loadApiPage = async () => {
     }
   } catch {}
 
-  ["api-task-format","api-domain-format","api-task-from","api-task-to","api-domain-from","api-domain-to"]
-    .forEach((id) => document.getElementById(id)?.addEventListener("change", buildApiUrl));
+  ["api-task-format","api-domain-format","api-task-from","api-task-to","api-domain-from","api-domain-to","api-task-page","api-task-limit","api-domain-page","api-domain-limit"]
+    .forEach((id) => document.getElementById(id)?.addEventListener("input", buildApiUrl));
 
   buildApiUrl();
 };
@@ -3254,10 +3254,14 @@ const buildApiUrl = () => {
     const fmt = document.getElementById("api-task-format")?.value || "json";
     const from = document.getElementById("api-task-from")?.value;
     const to = document.getElementById("api-task-to")?.value;
+    const page = document.getElementById("api-task-page")?.value;
+    const limit = document.getElementById("api-task-limit")?.value;
     if (taskId) {
       const p = new URLSearchParams();
       if (from) p.set("filterFrom", from);
       if (to) p.set("filterTo", to);
+      if (page) p.set("page", page);
+      if (limit) p.set("limit", limit);
       const qs = p.toString() ? "?" + p.toString() : "";
       path = `/api/tasks/${taskId}/export/${fmt}${qs}`;
     }
@@ -3266,10 +3270,14 @@ const buildApiUrl = () => {
     const fmt = document.getElementById("api-domain-format")?.value || "json";
     const from = document.getElementById("api-domain-from")?.value;
     const to = document.getElementById("api-domain-to")?.value;
+    const page = document.getElementById("api-domain-page")?.value;
+    const limit = document.getElementById("api-domain-limit")?.value;
     if (domain) {
       const p = new URLSearchParams({ domain, format: fmt });
       if (from) p.set("filterFrom", from);
       if (to) p.set("filterTo", to);
+      if (page) p.set("page", page);
+      if (limit) p.set("limit", limit);
       path = `/api/export/domain?${p}`;
     }
   }
@@ -3308,7 +3316,12 @@ const runApiTest = async () => {
     const pre = document.getElementById("api-result-pre");
     const info = document.getElementById("api-result-info");
     const cnt = Array.isArray(data) ? data.length : null;
-    if (info) info.textContent = cnt !== null ? `${cnt} записів` : (resp.ok ? "OK" : `Помилка ${resp.status}`);
+    const total = resp.headers.get("X-Total-Count");
+    const page = resp.headers.get("X-Page");
+    const pages = resp.headers.get("X-Total-Pages");
+    let infoText = cnt !== null ? `${cnt} записів` : (resp.ok ? "OK" : `Помилка ${resp.status}`);
+    if (total !== null) infoText += ` (всього: ${total}${page ? `, сторінка ${page}/${pages}` : ""})`;
+    if (info) info.textContent = infoText;
     if (pre) pre.textContent = JSON.stringify(data, null, 2).slice(0, 100000);
     if (wrap) wrap.style.display = "block";
   } catch (e) {
