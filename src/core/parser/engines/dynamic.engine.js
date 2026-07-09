@@ -1,5 +1,6 @@
 /**
- * Динамічний рушій — завантажує сторінки через Puppeteer з повним виконанням JavaScript.
+ * Динамічний рушій — завантажує сторінки через Playwright (Chromium Headless Shell)
+ * з повним виконанням JavaScript.
  *
  * Підходить для:
  *   - SPA (React, Vue, Angular)
@@ -9,24 +10,28 @@
  *
  * Підтримує GET і POST-запити (POST реалізується через перехоплення навігаційного запиту).
  *
- * Для встановлення: npm install puppeteer
+ * Chromium Headless Shell — урізана headless-only збірка Chromium (без частини UI-компонентів
+ * звичайного браузера), помітно менший відбиток пам'яті за повний Chromium — важливо на
+ * пам'яттю-обмежених хостах.
+ *
+ * Для встановлення: npm install playwright && npx playwright install --with-deps chromium-headless-shell
  */
 const cheerio = require('cheerio');
 const { applyStealthPatches, simulateHumanBehaviour, getRandomUserAgent } = require('../../../utils/anti-bot');
 const logger = require('../../../utils/logger');
 
-let puppeteer;
+let chromium;
 try {
-  puppeteer = require('puppeteer');
+  ({ chromium } = require('playwright'));
 } catch {
-  logger.warn('Puppeteer не встановлено — динамічний рушій вимкнено. Виконайте: npm install puppeteer');
+  logger.warn('Playwright не встановлено — динамічний рушій вимкнено. Виконайте: npm install playwright');
 }
 
 /**
- * Запускає браузер Puppeteer з опціональним проксі.
+ * Запускає браузер Playwright (chromium-headless-shell) з опціональним проксі.
  */
 const launchBrowser = async (proxy = null) => {
-  if (!puppeteer) throw new Error('Puppeteer не встановлено');
+  if (!chromium) throw new Error('Playwright не встановлено');
 
   const args = [
     '--no-sandbox',
@@ -45,20 +50,24 @@ const launchBrowser = async (proxy = null) => {
     '--mute-audio',
   ];
 
-  if (proxy) {
-    const auth = proxy.username ? `${proxy.username}:${proxy.password}@` : '';
-    args.push(`--proxy-server=${proxy.protocol}://${auth}${proxy.host}:${proxy.port}`);
-  }
-
   const launchOpts = {
     headless: process.env.PUPPETEER_HEADLESS !== 'false',
     args,
+    channel: 'chromium-headless-shell',
     ignoreDefaultArgs: ['--enable-automation'],
   };
+
+  if (proxy) {
+    launchOpts.proxy = {
+      server: `${proxy.protocol}://${proxy.host}:${proxy.port}`,
+      username: proxy.username || undefined,
+      password: proxy.password || undefined,
+    };
+  }
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     launchOpts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   }
-  return puppeteer.launch(launchOpts);
+  return chromium.launch(launchOpts);
 };
 
 // ── Browser pool ──────────────────────────────────────────────────────────────
@@ -135,7 +144,7 @@ const closeAll = async () => {
 };
 
 /**
- * Формує тіло POST-запиту та Content-Type для перехоплення запиту Puppeteer.
+ * Формує тіло POST-запиту та Content-Type для перехоплення запиту Playwright.
  *
  * @param {object|null} body        - Конфігурація тіла
  * @param {string}      body.format - Формат: 'json' | 'form' | 'raw'
@@ -166,9 +175,9 @@ const buildPostBody = (body) => {
 };
 
 /**
- * Завантажує сторінку через Puppeteer і повертає cheerio-інстанс після виконання JS.
+ * Завантажує сторінку через Playwright і повертає cheerio-інстанс після виконання JS.
  *
- * POST-запит реалізується через `page.setRequestInterception`: перший навігаційний
+ * POST-запит реалізується через `page.route`: перший навігаційний
  * запит до цільового URL перехоплюється і замінюється POST із вказаним тілом.
  *
  * @param {string}  url                     - Цільовий URL
@@ -202,15 +211,19 @@ const fetchPage = async (url, options = {}) => {
   } = options;
 
   // Беремо браузер з пулу (або запускаємо новий для цього проксі),
-  // але закриваємо лише сторінку — браузер живе далі.
+  // але закриваємо лише контекст/сторінку — браузер живе далі.
+  // UA та заголовки в Playwright задаються на рівні контексту, а не сторінки,
+  // тому кожен fetchPage створює власний короткоживучий контекст.
   const browser = await _getBrowser(proxy);
-  const page = await browser.newPage();
+  const context = await browser.newContext({
+    userAgent: getRandomUserAgent(),
+    extraHTTPHeaders: headers,
+  });
 
   try {
-    await page.setDefaultNavigationTimeout(timeout);
-    await page.setDefaultTimeout(timeout);
-    await page.setUserAgent(getRandomUserAgent());
-    await page.setExtraHTTPHeaders(headers);
+    context.setDefaultNavigationTimeout(timeout);
+    context.setDefaultTimeout(timeout);
+    const page = await context.newPage();
 
     if (antiBot) {
       await applyStealthPatches(page);
@@ -221,7 +234,7 @@ const fetchPage = async (url, options = {}) => {
         const [name, value] = c.trim().split('=');
         return { name: name.trim(), value: (value || '').trim(), url };
       });
-      await page.setCookie(...cookieList);
+      await context.addCookies(cookieList);
     }
 
     let response;
@@ -229,25 +242,23 @@ const fetchPage = async (url, options = {}) => {
     const needsInterception = blockResources || isPost;
 
     if (needsInterception) {
-      await page.setRequestInterception(true);
       const { postData, contentType } = isPost ? buildPostBody(body) : {};
       let intercepted = false;
 
-      page.on('request', (req) => {
+      await page.route('**/*', (route) => {
+        const req = route.request();
         if (blockResources && BLOCK_RESOURCE_TYPES.has(req.resourceType())) {
-          req.abort();
-          return;
+          return route.abort();
         }
         if (isPost && !intercepted && req.url() === url) {
           intercepted = true;
-          req.continue({
+          return route.continue({
             method: 'POST',
             postData,
             headers: { ...req.headers(), 'Content-Type': contentType },
           });
-          return;
         }
-        req.continue();
+        return route.continue();
       });
     }
 
@@ -274,9 +285,9 @@ const fetchPage = async (url, options = {}) => {
 
     return { $, status: response?.status() };
   } finally {
-    // Swallow close errors — if the browser crashed the page is already gone,
+    // Swallow close errors — if the browser crashed the context is already gone,
     // and letting this throw would mask the real error from the caller.
-    await page.close().catch(e => logger.warn('page.close failed', { url, error: e.message }));
+    await context.close().catch(e => logger.warn('context.close failed', { url, error: e.message }));
   }
 };
 
@@ -284,7 +295,7 @@ const fetchPage = async (url, options = {}) => {
  * Автоматично прокручує сторінку до самого низу невеликими кроками.
  * Використовується для завантаження lazy-load контенту та infinite scroll.
  *
- * @param {Page} page - Екземпляр сторінки Puppeteer
+ * @param {Page} page - Екземпляр сторінки Playwright
  * @returns {Promise<void>}
  */
 const autoScroll = async (page) => {

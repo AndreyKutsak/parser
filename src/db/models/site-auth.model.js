@@ -13,7 +13,7 @@ const siteAuthSchema = new mongoose.Schema(
     name:     { type: String, required: true, trim: true },
     loginUrl: { type: String, required: true },
 
-    // 'form'   — Puppeteer fills the form automatically
+    // 'form'   — Playwright fills the form automatically
     // 'manual' — user pastes cookies directly
     type: { type: String, enum: ['form', 'manual'], default: 'form' },
 

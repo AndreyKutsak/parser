@@ -2,21 +2,21 @@
  * Site authentication service.
  *
  * Supports two modes:
- *   form   — launches Puppeteer, fills the login form, extracts cookies
+ *   form   — launches Playwright, fills the login form, extracts cookies
  *   manual — cookies are already stored; nothing to do here
  */
 const logger = require('../../utils/logger');
 const siteAuthRepo = require('../../db/repositories/site-auth.repository');
 
-let puppeteer;
+let chromium;
 try {
-  puppeteer = require('puppeteer');
+  ({ chromium } = require('playwright'));
 } catch {
-  // Puppeteer is optional
+  // Playwright is optional
 }
 
 /**
- * Performs form-based authentication via Puppeteer.
+ * Performs form-based authentication via Playwright.
  * Navigates to loginUrl, fills credentials + any extra fields, submits,
  * waits for success, extracts cookies, and saves them to the DB.
  *
@@ -24,8 +24,8 @@ try {
  * @returns {Promise<string>} Cookie string "k=v; k2=v2"
  */
 const authenticateForm = async (auth) => {
-  if (!puppeteer) {
-    throw new Error('Puppeteer не встановлено. Виконайте: npm install puppeteer');
+  if (!chromium) {
+    throw new Error('Playwright не встановлено. Виконайте: npm install playwright');
   }
 
   const {
@@ -50,31 +50,32 @@ const authenticateForm = async (auth) => {
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
     ],
+    channel: 'chromium-headless-shell',
     ignoreDefaultArgs: ['--enable-automation'],
   };
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     launchOpts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   }
 
-  const browser = await puppeteer.launch(launchOpts);
+  const browser = await chromium.launch(launchOpts);
   const page = await browser.newPage();
 
   try {
-    await page.setDefaultNavigationTimeout(30000);
+    page.setDefaultNavigationTimeout(30000);
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
 
     // Fill username
     if (usernameSelector && credentials.username) {
       await page.waitForSelector(usernameSelector, { timeout: 10000 });
       await page.click(usernameSelector, { clickCount: 3 });
-      await page.type(usernameSelector, credentials.username, { delay: 40 });
+      await page.locator(usernameSelector).pressSequentially(credentials.username, { delay: 40 });
     }
 
     // Fill password
     if (passwordSelector && credentials.password) {
       await page.waitForSelector(passwordSelector, { timeout: 10000 });
       await page.click(passwordSelector, { clickCount: 3 });
-      await page.type(passwordSelector, credentials.password, { delay: 40 });
+      await page.locator(passwordSelector).pressSequentially(credentials.password, { delay: 40 });
     }
 
     // Fill extra fields
@@ -82,7 +83,7 @@ const authenticateForm = async (auth) => {
       if (field.selector && field.value) {
         await page.waitForSelector(field.selector, { timeout: 5000 }).catch(() => {});
         await page.click(field.selector, { clickCount: 3 });
-        await page.type(field.selector, field.value, { delay: 30 });
+        await page.locator(field.selector).pressSequentially(field.value, { delay: 30 });
       }
     }
 
@@ -104,7 +105,7 @@ const authenticateForm = async (auth) => {
     }
 
     // Extract cookies
-    const cookieArr = await page.cookies();
+    const cookieArr = await page.context().cookies();
     const cookieStr = cookieArr.map((c) => `${c.name}=${c.value}`).join('; ');
 
     logger.info('Site auth succeeded', { authId: auth._id, cookieCount: cookieArr.length });

@@ -117,7 +117,7 @@ const paginationSchema = new mongoose.Schema(
  *
  * @property {string}   name              - Назва задачі
  * @property {string}   url               - Єдиний URL (використовується якщо requests[] порожній)
- * @property {string}   engine            - Рушій: 'static' (axios+cheerio) | 'dynamic' (puppeteer)
+ * @property {string}   engine            - Рушій: 'static' (axios+cheerio) | 'dynamic' (playwright)
  * @property {ObjectId} owner             - Посилання на користувача-власника
  *
  * @property {Array}    requests          - Список запитів із власними URL/методами (режим кількох URL)

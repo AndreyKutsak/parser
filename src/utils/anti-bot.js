@@ -44,11 +44,11 @@ const buildHeaders = (customHeaders = {}) => ({
 });
 
 /**
- * Apply anti-detection patches to a Puppeteer page
+ * Apply anti-detection patches to a Playwright page
  * Hides webdriver fingerprints, sets realistic properties
  */
 const applyStealthPatches = async (page) => {
-  await page.evaluateOnNewDocument(() => {
+  await page.addInitScript(() => {
     // Overwrite the `webdriver` property to return false
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
 
@@ -76,7 +76,7 @@ const applyStealthPatches = async (page) => {
 };
 
 /**
- * Simulate human-like mouse movement on a Puppeteer page
+ * Simulate human-like mouse movement on a Playwright page
  */
 const simulateHumanBehaviour = async (page) => {
   // Random scroll

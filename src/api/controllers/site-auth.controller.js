@@ -22,7 +22,7 @@ const remove = async (req, res) => {
   res.json({ success: true });
 };
 
-// POST /:id/authenticate — run Puppeteer form login
+// POST /:id/authenticate — run Playwright form login
 const authenticate = async (req, res) => {
   try {
     const result = await siteAuthService.run(req.params.id, req.user._id);

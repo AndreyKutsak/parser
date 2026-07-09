@@ -18,7 +18,7 @@ const STATIC_QUEUE = "parser";
 const DYNAMIC_QUEUE = "parser-dynamic";
 // Static (axios) tasks are cheap — allow higher concurrency
 const STATIC_CONCURRENCY = parseInt(process.env.MAX_CONCURRENT_TASKS) || 5;
-// Dynamic (Puppeteer) tasks are heavy — limit to avoid memory pressure
+// Dynamic (Playwright) tasks are heavy — limit to avoid memory pressure
 const DYNAMIC_CONCURRENCY =
   parseInt(process.env.MAX_CONCURRENT_DYNAMIC_TASKS) || 2;
 const SHUTDOWN_TIMEOUT_MS =
