@@ -208,13 +208,17 @@ const fetchPage = async (url, options = {}) => {
     method         = 'GET',
     body           = null,
     blockResources = true,
+    // Одноразові виклики (напр. /api/tasks/preview) не повинні лишати браузер у довгоживучому
+    // пулі процесу, що їх викликав — у API-процесі (app.js) пул призначений тільки для воркера,
+    // і накопичення чужих браузерів там же відкриває шлях до heap OOM.
+    standalone     = false,
   } = options;
 
   // Беремо браузер з пулу (або запускаємо новий для цього проксі),
   // але закриваємо лише контекст/сторінку — браузер живе далі.
   // UA та заголовки в Playwright задаються на рівні контексту, а не сторінки,
   // тому кожен fetchPage створює власний короткоживучий контекст.
-  const browser = await _getBrowser(proxy);
+  const browser = standalone ? await launchBrowser(proxy) : await _getBrowser(proxy);
   const context = await browser.newContext({
     userAgent: getRandomUserAgent(),
     extraHTTPHeaders: headers,
@@ -288,6 +292,8 @@ const fetchPage = async (url, options = {}) => {
     // Swallow close errors — if the browser crashed the context is already gone,
     // and letting this throw would mask the real error from the caller.
     await context.close().catch(e => logger.warn('context.close failed', { url, error: e.message }));
+    // standalone browsers aren't pooled — nothing else will ever close them.
+    if (standalone) await browser.close().catch(e => logger.warn('standalone browser.close failed', { url, error: e.message }));
   }
 };
 

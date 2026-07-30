@@ -7,11 +7,26 @@ const logger = require('../../utils/logger');
 
 const MAX_PREVIEW_RECORDS = 20;
 
+// /api/tasks/preview завжди виконується прямо в цьому процесі (app.js, 256MB heap) — на відміну
+// від звичайних завдань, які йдуть через чергу в parser.worker. Без ліміту одночасних викликів
+// паралельні (або щільно послідовні від зовнішніх cron-скриптів) preview-запити з engine=dynamic
+// можуть накопичити кілька Chromium-інстансів у процесі API-сервера і завалити його по heap OOM.
+const MAX_CONCURRENT_PREVIEWS = parseInt(process.env.MAX_CONCURRENT_PREVIEWS) || 2;
+let activePreviewCount = 0;
+
 /**
  * Одноразовий тестовий парсинг: URL + селектори -> значення полів.
  * Нічого не зберігає в БД (без Task/Run/Result).
  */
 exports.preview = async (req, res, next) => {
+  if (activePreviewCount >= MAX_CONCURRENT_PREVIEWS) {
+    return res.status(503).json({
+      success: false,
+      message: 'Забагато одночасних тестових запитів, спробуйте за кілька секунд',
+    });
+  }
+  activePreviewCount++;
+
   try {
     const { url, engine, selectors, proxy: proxyCfg, options } = req.body;
 
@@ -23,7 +38,8 @@ exports.preview = async (req, res, next) => {
     }
 
     const fields = new Map(Object.entries(selectors.fields));
-    const fetchEngine = engine === 'dynamic' ? dynamicEngine : staticEngine;
+    const isDynamic = engine === 'dynamic';
+    const fetchEngine = isDynamic ? dynamicEngine : staticEngine;
 
     const fetchOptions = {
       method: options.method,
@@ -35,6 +51,7 @@ exports.preview = async (req, res, next) => {
       jsonPath: options.jsonPath,
       jsonHtmlField: options.jsonHtmlField,
       proxy,
+      ...(isDynamic ? { standalone: true } : {}),
     };
 
     const { $, status, rawJsonItems } = await fetchEngine.fetchPage(url, fetchOptions);
@@ -58,5 +75,7 @@ exports.preview = async (req, res, next) => {
   } catch (err) {
     logger.warn('Preview parse failed', { url: req.body?.url, error: err.message });
     next(err);
+  } finally {
+    activePreviewCount--;
   }
 };
