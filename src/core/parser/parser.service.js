@@ -228,6 +228,7 @@ class ParserService {
     const startTime = Date.now();
     let totalRecords = 0;
     let pagesVisited = 0;
+    let lastActivityAt = Date.now();
     const pageLog = []; // лог кожної сторінки
 
     logger.info("Запуск парсингу", {
@@ -831,9 +832,15 @@ class ParserService {
           totalRecords += resultsToSave.length;
           pagesVisited++;
           currentPage += (pagination.type === "url-pattern" ? (pagination.pageStep ?? 1) : 1);
-          // Оновлюємо Run та lastActivity кожні 10 сторінок, щоб не навантажувати MongoDB
+          // Оновлюємо Run кожні 10 сторінок, щоб не навантажувати MongoDB
           if (pagesVisited % 10 === 0) {
             Run.findOneAndUpdate({ runId }, { totalRecords, totalPages: pagesVisited }).catch(() => {});
+          }
+          // lastActivity — окремий таймер (раз на хвилину), а не за кількістю сторінок:
+          // під навантаженням задача може обробляти <10 сторінок за 30 хв watchdog-порогу
+          // і хибно позначатись як "зависла", хоча реально й далі парситься.
+          if (Date.now() - lastActivityAt >= 60_000) {
+            lastActivityAt = Date.now();
             taskRepo.update(task._id, { 'stats.lastActivity': new Date() }).catch(() => {});
           }
 
@@ -949,6 +956,10 @@ class ParserService {
               crawlDone++;
               if (crawlDone % 10 === 0) {
                 Run.findOneAndUpdate({ runId }, { totalRecords }).catch(() => {});
+              }
+              if (Date.now() - lastActivityAt >= 60_000) {
+                lastActivityAt = Date.now();
+                taskRepo.update(task._id, { 'stats.lastActivity': new Date() }).catch(() => {});
               }
               emit(task._id, {
                 type: "page:fetch",
