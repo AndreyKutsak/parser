@@ -13,6 +13,7 @@ const taskRepo = require("../../db/repositories/task.repository");
 const logger = require("../../utils/logger");
 const eventBridge = require("../../utils/event-bridge");
 const parseEvents = require("../../utils/parse-events");
+const memoryReporter = require("../../utils/memory-reporter");
 
 const STATIC_QUEUE = "parser";
 const DYNAMIC_QUEUE = "parser-dynamic";
@@ -39,6 +40,7 @@ async function main() {
 
   // Forward parse events from this worker process to the main server via Redis Pub/Sub
   await eventBridge.initPublisher(parseEvents);
+  await memoryReporter.startReporting("parser.worker");
 
   logger.info("Parser worker started", {
     staticConcurrency: STATIC_CONCURRENCY,

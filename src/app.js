@@ -10,6 +10,7 @@ const queueManager = require("./queue/queue.manager");
 const logger = require("./utils/logger");
 const eventBridge = require("./utils/event-bridge");
 const parseEvents = require("./utils/parse-events");
+const memoryReporter = require("./utils/memory-reporter");
 const createApp = require("./server/createApp");
 
 const app = createApp();
@@ -23,6 +24,7 @@ async function start() {
     scheduler.start();
     await scheduler.loadFromDatabase();
     subTaskScheduler.start();
+    memoryReporter.startReporting("app");
     app.listen(PORT, () => {
       logger.info(`Web Parser Pro running on http://localhost:${PORT}`);
       logger.info(`API docs: http://localhost:${PORT}/api-docs`);

@@ -344,7 +344,49 @@ const loadMonitor = async () => {
 
   try {
     const data = await API.monitor.get();
-    const { runningTasks, pausedTasks, scheduledTasks, activeSubtasks } = data;
+    const { runningTasks, pausedTasks, scheduledTasks, activeSubtasks, memory, system } = data;
+
+    // Process memory
+    const fmtMB = (bytes) => (bytes ? (bytes / 1024 / 1024).toFixed(0) : "—");
+    if (system) {
+      const usedPct = (
+        ((system.totalMem - system.freeMem) / system.totalMem) *
+        100
+      ).toFixed(0);
+      UI.setHtml(
+        "monitor-system-mem",
+        `Хост: ${fmtMB(system.totalMem - system.freeMem)} / ${fmtMB(system.totalMem)} МБ (${usedPct}%)`,
+      );
+    }
+    UI.setHtml(
+      "monitor-memory",
+      memory?.length
+        ? memory
+            .map((m) => {
+              const limit = m.restartLimitBytes || m.heapLimitBytes;
+              const pct = limit ? Math.min(100, Math.round((m.rss / limit) * 100)) : null;
+              const barColor =
+                pct == null ? "var(--border)" : pct >= 90 ? "var(--danger)" : pct >= 70 ? "var(--warning)" : "var(--success)";
+              return `
+            <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
+              <div class="flex-gap" style="align-items:center;gap:8px;margin-bottom:6px">
+                <div style="font-weight:500;font-size:13px">${escHtml(m.name)}</div>
+                <div style="font-size:11px;color:var(--text-2)">pid ${m.pid}</div>
+                <div style="margin-left:auto;font-size:12px;font-weight:600">
+                  ${fmtMB(m.rss)} МБ${limit ? ` / ${fmtMB(limit)} МБ` : ""}
+                </div>
+              </div>
+              <div style="height:6px;border-radius:3px;background:var(--bg-2,#eee);overflow:hidden">
+                <div style="height:100%;width:${pct ?? 0}%;background:${barColor}"></div>
+              </div>
+              <div style="font-size:11px;color:var(--text-2);margin-top:4px">
+                heap: ${fmtMB(m.heapUsed)} / ${fmtMB(m.heapTotal)} МБ
+              </div>
+            </div>`;
+            })
+            .join("")
+        : '<div class="empty-state" style="padding:16px">Немає даних</div>',
+    );
 
     // Running
     UI.setHtml("monitor-running-count", runningTasks.length);
