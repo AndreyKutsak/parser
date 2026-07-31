@@ -22,13 +22,6 @@ npm run dev
 - UI: [http://localhost:3000](http://localhost:3000)
 - API Docs: [http://localhost:3000/api-docs](http://localhost:3000/api-docs)
 
-### Через Docker
-
-```bash
-cp .env.example .env
-docker-compose up -d
-```
-
 ## Основні можливості
 
 - Статичний і динамічний парсинг
