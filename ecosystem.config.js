@@ -3,9 +3,10 @@ module.exports = {
     {
       name: 'app',
       script: 'src/app.js',
-      // After scheduler→queue fix the app only runs Express + queue client, ~100-150MB
-      node_args: '--max-old-space-size=256',
-      max_memory_restart: '350M',
+      // Hit real V8 heap OOM in prod at 256MB (2026-07-30) — host cgroup limit is
+      // actually 16GB (shared HestiaCP box), so there's plenty of headroom to raise this.
+      node_args: '--max-old-space-size=512',
+      max_memory_restart: '700M',
       autorestart: true,
       exp_backoff_restart_delay: 200,
       min_uptime: '10s',   // don't count as crashed if it stays up ≥10s
