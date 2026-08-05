@@ -211,7 +211,8 @@ const fetchPage = async (url, options = {}) => {
   }
 
   const $ = cheerio.load(htmlContent, { decodeEntities: true });
-  return { $, status: response.status, duration, rawJsonItems };
+  const finalUrl = response.request?.res?.responseUrl || url;
+  return { $, status: response.status, duration, rawJsonItems, finalUrl };
 };
 
 module.exports = { fetchPage };

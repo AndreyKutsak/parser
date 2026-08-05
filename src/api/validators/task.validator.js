@@ -172,6 +172,11 @@ const previewSchema = Joi.object({
     proxyId: Joi.string().hex().length(24).allow(null).default(null),
   }).default({}),
 
+  // Reuse a saved SiteAuth's stored cookies (same mechanism real task runs use) —
+  // lets the preview/test endpoint verify parsing against login-protected sites
+  // without pasting cookies manually into options.cookies.
+  siteAuth: Joi.string().hex().length(24).allow(null).default(null),
+
   options: Joi.object({
     method: Joi.string().valid("GET", "POST").default("GET"),
     body: Joi.object({

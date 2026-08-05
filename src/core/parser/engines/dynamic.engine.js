@@ -287,7 +287,7 @@ const fetchPage = async (url, options = {}) => {
 
     logger.debug('Динамічний запит', { url, method, status: response?.status() });
 
-    return { $, status: response?.status() };
+    return { $, status: response?.status(), finalUrl: page.url() };
   } finally {
     // Swallow close errors — if the browser crashed the context is already gone,
     // and letting this throw would mask the real error from the caller.
