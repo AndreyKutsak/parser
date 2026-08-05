@@ -4,6 +4,7 @@ const results = require('../controllers/results.controller');
 const exporter = require('../controllers/export.controller');
 const analytics = require('../controllers/analytics.controller');
 const preview = require('../controllers/preview.controller');
+const rawLoginCtrl = require('../controllers/raw-login.controller');
 const { requireAuth, requireApiToken } = require('../middlewares/auth.middleware');
 const { validateCreate, validateUpdate, validatePreview } = require('../validators/task.validator');
 
@@ -15,6 +16,10 @@ router.get('/:taskId/results/search', results.search);
 
 // Selector test/preview — protected by a static API token (PREVIEW_API_TOKEN), not a user JWT
 router.post('/preview', requireApiToken, validatePreview, preview.preview);
+
+// Пряма HTTP-авторизація на сайті конкурента (форма логін/пароль -> cookies), виконана цим
+// сервером — те саме призначення, той самий статичний токен, що і /preview.
+router.post('/raw-login', requireApiToken, rawLoginCtrl.rawLogin);
 
 router.use(requireAuth);
 
