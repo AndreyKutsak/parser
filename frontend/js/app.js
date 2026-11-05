@@ -156,6 +156,7 @@ const navigate = (page) => {
     proxies: loadProxies,
     results: loadResults,
     monitor: loadMonitor,
+    errors: loadErrors,
     "site-auths": loadSiteAuths,
     api: loadApiPage,
   };
@@ -517,6 +518,203 @@ const loadMonitor = async () => {
     }, 15000);
   } catch (err) {
     UI.toast("Помилка завантаження монітора: " + err.message, "error");
+  }
+};
+
+// ── Server errors ─────────────────────────────────────────────────────────
+
+let _errorsRefreshTimer = null;
+const _openErrorGroups = new Set();
+
+const fmtAgo = (d) => {
+  const sec = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 1000));
+  if (sec < 60) return `${sec}с тому`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}хв тому`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}г тому`;
+  return `${Math.floor(sec / 86400)}д тому`;
+};
+
+/** Короткий опис з meta: що саме впало (taskId, шлях запиту, текст помилки). */
+const errorContext = (meta) => {
+  if (!meta) return "";
+  const parts = [];
+  if (meta.method && meta.path) parts.push(`${meta.method} ${meta.path}`);
+  if (meta.status) parts.push(`HTTP ${meta.status}`);
+  if (meta.taskId) parts.push(`task ${meta.taskId}`);
+  const err = meta.error || meta.reason || meta.message;
+  if (err) parts.push(String(err).split("\n")[0]);
+  return parts.join(" · ");
+};
+
+const updateErrorsBadge = (summary) => {
+  const el = document.getElementById("nav-errors-badge");
+  if (!el || !summary) return;
+  el.textContent = summary.h24 > 999 ? "999+" : summary.h24;
+  el.title = `Помилок за 24 години: ${summary.h24}`;
+  el.classList.toggle("hidden", !summary.h24);
+};
+
+/** Оновлює бейдж у меню раз на хвилину (лише коли користувач залогінений). */
+const startErrorsBadge = () => {
+  const tick = () => {
+    if (!API.getToken()) return;
+    API.errors.summary().then((d) => updateErrorsBadge(d.summary)).catch(() => {});
+  };
+  tick();
+  setInterval(tick, 60000);
+};
+
+const loadErrors = async () => {
+  clearInterval(_errorsRefreshTimer);
+  const period = document.getElementById("errors-period")?.value || "24h";
+  const proc = document.getElementById("errors-process")?.value || "";
+  const q = document.getElementById("errors-search")?.value.trim() || "";
+
+  try {
+    const params = { period };
+    if (proc) params.process = proc;
+    if (q) params.q = q;
+    const { summary, processes, groups } = await API.errors.list(params);
+
+    UI.setHtml("errors-stat-h1", summary.h1.toLocaleString());
+    UI.setHtml("errors-stat-h24", summary.h24.toLocaleString());
+    UI.setHtml("errors-stat-d7", summary.d7.toLocaleString());
+    updateErrorsBadge(summary);
+
+    const sel = document.getElementById("errors-process");
+    if (sel) {
+      sel.innerHTML =
+        '<option value="">Усі процеси</option>' +
+        processes.map((p) => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join("");
+      sel.value = processes.includes(proc) ? proc : "";
+    }
+
+    UI.setHtml("errors-groups-count", groups.length);
+    UI.setHtml(
+      "errors-list",
+      groups.length
+        ? groups
+            .map((g) => {
+              const ctx = errorContext(g.lastSample?.meta);
+              return `
+          <div style="border-bottom:1px solid var(--border)">
+            <div class="flex-gap" style="padding:10px 16px;align-items:flex-start;gap:12px;cursor:pointer"
+                 onclick="toggleErrorGroup('${g.fingerprint}')">
+              <span class="badge badge-error" style="flex-shrink:0;min-width:44px;text-align:center" title="Кількість за період">×${g.count.toLocaleString()}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:500;font-size:13px;word-break:break-word">${escHtml(g.message || "(без повідомлення)")}</div>
+                ${ctx ? `<div style="font-size:12px;color:var(--text-2);margin-top:2px;word-break:break-word">${escHtml(ctx.slice(0, 300))}</div>` : ""}
+                <div style="font-size:11px;color:var(--text-2);margin-top:4px">
+                  ${g.processes.map((p) => `<span class="code">${escHtml(p)}</span>`).join(" ")}
+                  · остання: <b title="${UI.fmtDate(g.lastAt)}">${fmtAgo(g.lastAt)}</b>
+                  · перша: ${UI.fmtDate(g.firstAt)}
+                </div>
+              </div>
+              <button class="btn btn-xs btn-ghost" style="flex-shrink:0" title="Позначити як розібрану (видалити групу)"
+                      onclick="event.stopPropagation(); removeErrorGroup('${g.fingerprint}')">✓ Розібрано</button>
+            </div>
+            <div id="error-details-${g.fingerprint}" class="${_openErrorGroups.has(g.fingerprint) ? "" : "hidden"}"
+                 style="padding:0 16px 12px 72px"></div>
+          </div>`;
+            })
+            .join("")
+        : '<div class="empty-state" style="padding:16px">Помилок за цей період немає 🎉</div>',
+    );
+
+    // Перезавантажити деталі груп, які користувач тримав відкритими
+    [..._openErrorGroups].forEach((fp) =>
+      groups.some((g) => g.fingerprint === fp) ? loadErrorDetails(fp) : _openErrorGroups.delete(fp),
+    );
+
+    _errorsRefreshTimer = setInterval(() => {
+      if (document.getElementById("page-errors")?.classList.contains("hidden")) {
+        clearInterval(_errorsRefreshTimer);
+        return;
+      }
+      loadErrors();
+    }, 30000);
+  } catch (err) {
+    UI.toast("Помилка завантаження списку помилок: " + err.message, "error");
+  }
+};
+
+const toggleErrorGroup = (fp) => {
+  const el = document.getElementById(`error-details-${fp}`);
+  if (!el) return;
+  if (_openErrorGroups.has(fp)) {
+    _openErrorGroups.delete(fp);
+    el.classList.add("hidden");
+  } else {
+    _openErrorGroups.add(fp);
+    el.classList.remove("hidden");
+    loadErrorDetails(fp);
+  }
+};
+
+const loadErrorDetails = async (fp) => {
+  const el = document.getElementById(`error-details-${fp}`);
+  if (!el) return;
+  if (!el.innerHTML) el.innerHTML = '<div style="font-size:12px;color:var(--text-2)">Завантаження…</div>';
+  try {
+    const d = await API.errors.get(fp);
+
+    // Погодинна гістограма за 7 днів (сумуємо процеси)
+    const byHour = new Map();
+    d.hourly.forEach((h) => byHour.set(h.hour, (byHour.get(h.hour) || 0) + h.count));
+    const hours = [...byHour.entries()].sort((a, b) => new Date(a[0]) - new Date(b[0]));
+    const max = Math.max(1, ...hours.map(([, c]) => c));
+    const chart = hours.length
+      ? `<div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Розподіл за годинами (7 днів), всього ${d.count.toLocaleString()}</div>
+         <div style="display:flex;align-items:flex-end;gap:2px;height:40px;margin-bottom:12px">
+           ${hours
+             .map(
+               ([h, c]) =>
+                 `<div title="${UI.fmtDate(h)}: ${c}" style="width:6px;height:${Math.max(3, Math.round((c / max) * 40))}px;background:var(--danger);border-radius:1px"></div>`,
+             )
+             .join("")}
+         </div>`
+      : "";
+
+    const samples = d.samples
+      .map((s) => {
+        const meta = s.meta ? JSON.stringify(s.meta, null, 2) : "";
+        return `
+        <div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:8px">
+          <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">
+            ${UI.fmtDate(s.at)} · <span class="code">${escHtml(s.process)}</span>
+          </div>
+          <div style="font-size:12px;font-weight:500;white-space:pre-wrap;word-break:break-word">${escHtml(s.message || "")}</div>
+          ${meta ? `<pre style="font-size:11px;margin:6px 0 0;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto">${escHtml(meta)}</pre>` : ""}
+          ${s.stack ? `<details style="margin-top:6px"><summary style="font-size:11px;cursor:pointer;color:var(--text-2)">Stack trace</summary><pre style="font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto">${escHtml(s.stack)}</pre></details>` : ""}
+        </div>`;
+      })
+      .join("");
+
+    el.innerHTML = chart + `<div style="font-size:11px;color:var(--text-2);margin-bottom:6px">Останні випадки</div>` + samples;
+  } catch (err) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--danger)">Не вдалося завантажити: ${escHtml(err.message)}</div>`;
+  }
+};
+
+const removeErrorGroup = async (fp) => {
+  try {
+    await API.errors.remove(fp);
+    _openErrorGroups.delete(fp);
+    loadErrors();
+  } catch (err) {
+    UI.toast("Не вдалося видалити: " + err.message, "error");
+  }
+};
+
+const clearAllErrors = async () => {
+  if (!UI.confirm("Видалити всі збережені помилки?")) return;
+  try {
+    const { deleted } = await API.errors.clear();
+    UI.toast(`Видалено записів: ${deleted}`, "success");
+    _openErrorGroups.clear();
+    loadErrors();
+  } catch (err) {
+    UI.toast("Не вдалося очистити: " + err.message, "error");
   }
 };
 
@@ -3441,6 +3639,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.querySelectorAll("[data-page]").forEach((el) => {
     el.addEventListener("click", () => navigate(el.dataset.page));
   });
+
+  // Лічильник помилок сервера в меню
+  startErrorsBadge();
 
   // API tester tabs
   document.querySelectorAll("#api-tabs .tab").forEach((tab) => {

@@ -159,6 +159,33 @@
           </svg>
           Черга
         </div>
+        <div class="nav-item" data-page="errors">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            <path d="M12 9v4M12 17h.01" />
+          </svg>
+          Помилки
+          <span
+            id="nav-errors-badge"
+            class="hidden"
+            style="
+              margin-left: auto;
+              background: var(--danger);
+              color: #fff;
+              border-radius: 9px;
+              padding: 0 6px;
+              font-size: 11px;
+              line-height: 18px;
+              min-width: 18px;
+              text-align: center;
+            "
+          ></span>
+        </div>
         <div class="nav-item" data-page="proxies">
           <svg
             viewBox="0 0 24 24"
@@ -614,6 +641,83 @@
               <div class="empty-state" style="padding: 16px">
                 Немає активних підзадач
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Помилки сервера ──────────────────────────────────────── -->
+        <div id="page-errors" class="page hidden">
+          <div class="flex-gap" style="margin-bottom: 20px">
+            <div>
+              <div class="section-title">Помилки сервера</div>
+              <p class="section-sub">
+                Помилки процесів app і parser.worker, згруповані за типом
+              </p>
+            </div>
+            <button
+              class="btn btn-ghost btn-sm ml-auto"
+              onclick="loadErrors()"
+            >
+              ↺ Оновити
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="clearAllErrors()">
+              Очистити все
+            </button>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-val" id="errors-stat-h1">—</div>
+              <div class="stat-label">За останню годину</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="errors-stat-h24">—</div>
+              <div class="stat-label">За 24 години</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-val" id="errors-stat-d7">—</div>
+              <div class="stat-label">За 7 днів</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div
+              class="card-header"
+              style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"
+            >
+              Типи помилок
+              <span id="errors-groups-count" class="badge badge-error">0</span>
+              <div style="margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap">
+                <select
+                  id="errors-period"
+                  class="form-control"
+                  style="width: auto; padding: 4px 8px"
+                  onchange="loadErrors()"
+                >
+                  <option value="1h">1 година</option>
+                  <option value="24h" selected>24 години</option>
+                  <option value="7d">7 днів</option>
+                  <option value="30d">30 днів</option>
+                </select>
+                <select
+                  id="errors-process"
+                  class="form-control"
+                  style="width: auto; padding: 4px 8px"
+                  onchange="loadErrors()"
+                >
+                  <option value="">Усі процеси</option>
+                </select>
+                <input
+                  id="errors-search"
+                  class="form-control"
+                  style="width: 180px; padding: 4px 8px"
+                  placeholder="Пошук у тексті…"
+                  onkeydown="if (event.key === 'Enter') loadErrors()"
+                />
+              </div>
+            </div>
+            <div id="errors-list">
+              <div class="empty-state" style="padding: 16px">Немає даних</div>
             </div>
           </div>
         </div>
@@ -2107,6 +2211,7 @@
               results: "Результати",
               proxies: "Проксі",
               monitor: "Черга задач",
+              errors: "Помилки сервера",
               "site-auths": "Авторизації",
             };
             document.getElementById("topbar-title").textContent =

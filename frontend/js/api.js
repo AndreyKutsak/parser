@@ -185,6 +185,15 @@ const API = (() => {
     get: () => request("GET", "/monitor"),
   };
 
+  // ── Server errors ────────────────────────────────────────────────
+  const errors = {
+    list: (p = {}) => request("GET", "/errors?" + new URLSearchParams(p)),
+    summary: () => request("GET", "/errors?summaryOnly=1"),
+    get: (fp) => request("GET", `/errors/${encodeURIComponent(fp)}`),
+    remove: (fp) => request("DELETE", `/errors/${encodeURIComponent(fp)}`),
+    clear: () => request("DELETE", "/errors"),
+  };
+
   // ── Proxies ───────────────────────────────────────────────────────
   const proxies = {
     list: (p) => request("GET", "/proxies?" + new URLSearchParams(p || {})),
@@ -213,6 +222,7 @@ const API = (() => {
     proxies,
     subtasks,
     monitor,
+    errors,
     analytics: analyticsApi,
     siteAuths,
     getToken,

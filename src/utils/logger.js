@@ -5,6 +5,7 @@ const winston = require('winston');
 require('winston-daily-rotate-file');
 const path = require('path');
 const fs = require('fs');
+const ErrorMonitorTransport = require('./error-monitor.transport');
 
 const logDir = path.join(process.cwd(), 'logs');
 
@@ -51,6 +52,9 @@ const logger = winston.createLogger({
       maxSize: '50m',
       format: fileFormat,
     }),
+
+    // Помилки → MongoDB для сторінки "Помилки" у веб-інтерфейсі
+    new ErrorMonitorTransport(),
   ],
 });
 
