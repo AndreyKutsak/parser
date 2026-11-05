@@ -16,6 +16,11 @@ const proxySchema = new mongoose.Schema({
   failCount:    { type: Number, default: 0 },
   useCount:     { type: Number, default: 0 },
 
+  // Результат останньої перевірки
+  lastError:   { type: String },   // причина останньої невдалої перевірки
+  exitIp:      { type: String },   // IP, який бачать сайти через цей проксі
+  transparent: { type: Boolean, default: false }, // проксі розкриває IP нашого сервера
+
   country: { type: String },
   tags:    [{ type: String }],
   note:    { type: String },

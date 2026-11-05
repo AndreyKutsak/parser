@@ -95,6 +95,68 @@ class ProxyRepository {
     return proxy;
   }
 
+  /**
+   * Результат планової/ручної перевірки (не реального використання):
+   * не чіпає useCount/lastUsed, щоб не спотворювати ротацію і статистику.
+   */
+  async recordCheckSuccess(id, { responseTime, country, exitIp, transparent, protocol }) {
+    return Proxy.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: "active",
+          responseTime,
+          lastChecked: new Date(),
+          failCount: 0,
+          exitIp,
+          transparent: !!transparent,
+          ...(country ? { country } : {}),
+          ...(protocol ? { protocol } : {}), // https→http, якщо автовизначення показало, що це http-проксі
+        },
+        $unset: { lastError: "" },
+      },
+      { new: true },
+    );
+  }
+
+  /**
+   * Невдала перевірка: проксі виключається з ротації (inactive), після 5 поспіль невдач — banned.
+   * Наступна успішна перевірка повертає його в active.
+   */
+  async recordCheckFailure(id, errorMsg) {
+    const proxy = await Proxy.findByIdAndUpdate(
+      id,
+      {
+        $inc: { failCount: 1 },
+        $set: { lastChecked: new Date(), lastError: String(errorMsg || "").slice(0, 300) },
+      },
+      { new: true },
+    );
+    if (proxy) {
+      const status = proxy.failCount >= 5 ? "banned" : "inactive";
+      if (proxy.status !== status) await Proxy.findByIdAndUpdate(id, { $set: { status } });
+    }
+    return proxy;
+  }
+
+  /**
+   * Скинути накопичені помилки: failCount=0, прибрати lastError, banned → inactive
+   * (у ротацію не потрапляють до наступної успішної перевірки, але знову мають 5 спроб до бану).
+   */
+  async resetErrors() {
+    const [counters, unbanned] = await Promise.all([
+      Proxy.updateMany({}, { $set: { failCount: 0 }, $unset: { lastError: "" } }),
+      Proxy.updateMany({ status: "banned" }, { $set: { status: "inactive" } }),
+    ]);
+    return { reset: counters.modifiedCount, unbanned: unbanned.modifiedCount };
+  }
+
+  /** Видалити всі неробочі проксі (inactive + banned). */
+  async deleteDead() {
+    const { deletedCount } = await Proxy.deleteMany({ status: { $in: ["inactive", "banned"] } });
+    return { deleted: deletedCount };
+  }
+
   async getActiveCount() {
     return Proxy.countDocuments({ status: "active" });
   }

@@ -2,7 +2,7 @@
  * Proxy Manager — handles proxy rotation, health tracking, and validation
  */
 const proxyRepo = require("../../db/repositories/proxy.repository");
-const { validateProxy, validateBatch } = require("./proxy.validator");
+const { validateProxy, validateBatch, precheck } = require("./proxy.validator");
 const logger = require("../../utils/logger");
 
 class ProxyManager {
@@ -12,6 +12,7 @@ class ProxyManager {
     this._index = 0;
     this._cacheExpiry = 0;
     this.CACHE_TTL = 60 * 1000; // 1 minute
+    this._checkStatus = { running: false };
   }
 
   /**
@@ -150,30 +151,73 @@ class ProxyManager {
     }
   }
 
+  /** Стан поточної/останньої масової перевірки (для UI і щоб не запускати дві одночасно). */
+  getCheckStatus() {
+    return { ...this._checkStatus };
+  }
+
+  async _saveCheckResult(proxy, result) {
+    if (result.ok) {
+      await proxyRepo.recordCheckSuccess(proxy._id, {
+        responseTime: result.responseTime,
+        country: result.country,
+        exitIp: result.ip,
+        transparent: result.transparent,
+        protocol: result.protocol,
+      });
+    } else {
+      await proxyRepo.recordCheckFailure(proxy._id, result.error);
+    }
+  }
+
   /**
-   * Test all active proxies and update their status in DB
+   * Перевірити всі проксі (включно з inactive/banned — вони можуть ожити) і оновити статуси.
+   * @param {string} trigger - 'manual' | 'schedule'
+   * Повторний виклик під час перевірки не запускає другу — повертає поточний стан.
    */
-  async checkAll() {
-    const { items: proxies } = await proxyRepo.findAll({ limit: 10000 }); // перевіряємо всі, включно з banned
-    logger.info(`Checking ${proxies.length} proxies...`);
+  async checkAll(trigger = "manual") {
+    if (this._checkStatus.running) return { alreadyRunning: true, ...this.getCheckStatus() };
 
-    const results = await validateBatch(proxies, async (proxy, result) => {
-      if (result.ok) {
-        await proxyRepo.recordSuccess(proxy._id, result.responseTime, {
-          country: result.country,
-          protocol: result.protocol,
-        });
-      } else {
-        await proxyRepo.recordFailure(proxy._id, result.error);
+    this._checkStatus = { running: true, trigger, startedAt: new Date(), finishedAt: null, total: 0, done: 0, ok: 0, bad: 0, transparent: 0, error: null };
+    const st = this._checkStatus;
+
+    try {
+      // Якщо сервіс перевірки недоступний напряму — не перевіряємо, інакше всі проксі
+      // отримали б failCount++ через чужий збій і після кількох запусків — ban.
+      let serverIp;
+      try {
+        serverIp = await precheck();
+      } catch (err) {
+        throw new Error(`Сервіс перевірки недоступний, перевірку скасовано: ${err.message}`);
       }
-    });
 
-    const ok = results.filter((r) => r.result.ok).length;
-    const bad = results.length - ok;
-    this._invalidateCache();
+      const { items: proxies } = await proxyRepo.findAll({ limit: 100000 });
+      st.total = proxies.length;
+      logger.info(`Checking ${proxies.length} proxies...`, { trigger });
 
-    logger.info("Proxy check complete", { ok, bad, total: results.length });
-    return { ok, bad, total: results.length };
+      await validateBatch(
+        proxies,
+        async (proxy, result) => {
+          st.done++;
+          if (result.ok) st.ok++;
+          else st.bad++;
+          if (result.transparent) st.transparent++;
+          await this._saveCheckResult(proxy, result);
+        },
+        { serverIp },
+      );
+
+      logger.info("Proxy check complete", { trigger, ok: st.ok, bad: st.bad, transparent: st.transparent, total: st.total, durationMs: Date.now() - st.startedAt });
+      return { ok: st.ok, bad: st.bad, transparent: st.transparent, total: st.total };
+    } catch (err) {
+      st.error = err.message;
+      logger.error("Proxy check failed", { trigger, error: err.message });
+      throw err;
+    } finally {
+      st.running = false;
+      st.finishedAt = new Date();
+      this._invalidateCache();
+    }
   }
 
   /**
@@ -183,15 +227,10 @@ class ProxyManager {
     const proxy = await proxyRepo.findById(id);
     if (!proxy) throw new Error("Proxy not found");
 
-    const result = await validateProxy(proxy);
-    if (result.ok) {
-      await proxyRepo.recordSuccess(id, result.responseTime, {
-        country: result.country,
-        protocol: result.protocol,
-      });
-    } else {
-      await proxyRepo.recordFailure(id, result.error);
-    }
+    const serverIp = await precheck().catch(() => null);
+    const result = await validateProxy(proxy, { serverIp });
+    await this._saveCheckResult(proxy, result);
+    this._invalidateCache();
     const updatedProxy = await proxyRepo.findById(id);
     return { proxy: updatedProxy, ...result };
   }
@@ -235,6 +274,21 @@ class ProxyManager {
     return { deleted: deleted.length, total: ids.length };
   }
 
+  async resetErrors() {
+    const result = await proxyRepo.resetErrors();
+    this._invalidateCache();
+    logger.info("Proxy errors reset", result);
+    return result;
+  }
+
+  async deleteDead() {
+    if (this._checkStatus.running) throw Object.assign(new Error("Дочекайтесь завершення перевірки"), { statusCode: 409 });
+    const result = await proxyRepo.deleteDead();
+    this._invalidateCache();
+    logger.info("Dead proxies deleted", result);
+    return result;
+  }
+
   async getStats() {
     const { items } = await proxyRepo.findAll({ limit: 10000 });
     const byStatus = items.reduce((acc, p) => {
@@ -261,8 +315,9 @@ class ProxyManager {
   async _refreshCache() {
     if (Date.now() < this._cacheExpiry) return;
     const { items } = await proxyRepo.findAll({ status: "active" });
-    // Filter out proxies with too many failures
-    this._activeProxies = items.filter((proxy) => (proxy.failCount || 0) < 3);
+    // Filter out proxies with too many failures and transparent ones (вони розкривають IP сервера —
+    // від блокувань не захищають)
+    this._activeProxies = items.filter((proxy) => (proxy.failCount || 0) < 3 && !proxy.transparent);
     this._index = 0;
     this._cacheExpiry = Date.now() + this.CACHE_TTL;
   }

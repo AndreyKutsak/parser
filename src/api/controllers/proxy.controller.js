@@ -308,11 +308,48 @@ exports.check = async (req, res, next) => {
  */
 exports.checkAll = async (req, res, next) => {
   try {
-    // Run in background; return immediately
-    proxyManager
-      .checkAll()
-      .catch((e) => logger.error("Proxy check error", { error: e.message }));
+    const status = proxyManager.getCheckStatus();
+    if (status.running) {
+      return res.status(409).json({
+        success: false,
+        message: `Перевірка вже виконується: ${status.done}/${status.total}`,
+        status,
+      });
+    }
+    // Run in background; return immediately (помилку логує сам checkAll)
+    proxyManager.checkAll("manual").catch(() => {});
     res.json({ success: true, message: "Proxy check started in background" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/proxies/check-status — прогрес поточної або результат останньої масової перевірки
+ * + час наступного автоматичного запуску.
+ */
+exports.checkStatus = async (req, res, next) => {
+  try {
+    const proxyScheduler = require("../../core/proxy/proxy.scheduler");
+    res.json({ success: true, ...proxyManager.getCheckStatus(), schedule: proxyScheduler.info() });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** POST /api/proxies/reset-errors — обнулити лічильники помилок, розбанити (banned → inactive). */
+exports.resetErrors = async (req, res, next) => {
+  try {
+    res.json({ success: true, ...(await proxyManager.resetErrors()) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** POST /api/proxies/delete-dead — видалити всі неробочі проксі (inactive + banned). */
+exports.deleteDead = async (req, res, next) => {
+  try {
+    res.json({ success: true, ...(await proxyManager.deleteDead()) });
   } catch (err) {
     next(err);
   }

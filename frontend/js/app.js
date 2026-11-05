@@ -790,10 +790,15 @@ const removeErrorGroup = async (fp) => {
 
 const clearAllErrors = async () => {
   const kind = document.getElementById("errors-kind")?.value || "";
-  const label = { server: "помилки сервера", site: "помилки сайтів", api: "відмови API" }[kind] || "усі збережені помилки";
+  let label = { server: "помилки сервера", site: "помилки сайтів", api: "відмови API" }[kind] || "усі збережені помилки";
+  if (_errorsDomain) label = `помилки сайту ${_errorsDomain}`;
   if (!UI.confirm(`Видалити ${label}?`)) return;
   try {
-    const { deleted } = await API.errors.clear(kind);
+    const params = {};
+    if (kind) params.kind = kind;
+    if (_errorsDomain) params.domain = _errorsDomain;
+    const { deleted } = await API.errors.clear(params);
+    _errorsDomain = "";
     UI.toast(`Видалено записів: ${deleted}`, "success");
     _openErrorGroups.clear();
     loadErrors();
@@ -3192,11 +3197,86 @@ const loadProxies = async () => {
     const s = statsData;
     UI.setHtml("proxy-stat-total", s.total || 0);
     UI.setHtml("proxy-stat-active", s.byStatus?.active || 0);
-    UI.setHtml("proxy-stat-banned", s.byStatus?.banned || 0);
+    UI.setHtml(
+      "proxy-stat-banned",
+      `${(s.byStatus?.inactive || 0) + (s.byStatus?.banned || 0)}` +
+        `<div style="font-size:11px;font-weight:400;color:var(--text-2)">inactive ${s.byStatus?.inactive || 0} · banned ${s.byStatus?.banned || 0}</div>`,
+    );
     UI.setHtml("proxy-stat-avgtime", (s.avgResponseTime || 0) + "ms");
+    // Якщо перевірка (ручна чи автоматична) вже йде — показуємо прогрес наживо
+    renderProxyCheckStatus().then((st) => {
+      if (st?.running && !_proxyCheckPoll) pollProxyCheck();
+    });
   } catch (err) {
     UI.toast("Не вдалося завантажити проксі: " + err.message, "error");
   }
+};
+
+let _proxyCheckPoll = null;
+
+/** Рядок стану: прогрес поточної перевірки / результат останньої / наступний автозапуск. */
+const renderProxyCheckStatus = async () => {
+  try {
+    const st = await API.proxies.checkStatus();
+    const next = st.schedule?.enabled
+      ? `Автоперевірка: <span class="code">${escHtml(st.schedule.cron)}</span>, наступна ${UI.fmtDate(st.schedule.nextRun)}`
+      : "Автоперевірка вимкнена";
+    let line;
+    if (st.running) {
+      const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
+      line = `<b>Перевірка виконується:</b> ${st.done}/${st.total} (${pct}%) · робочих ${st.ok} · неробочих ${st.bad}`;
+    } else if (st.finishedAt) {
+      line = st.error
+        ? `<span style="color:var(--danger)">Остання перевірка ${UI.fmtDate(st.finishedAt)} не вдалася: ${escHtml(st.error)}</span>`
+        : `Остання перевірка ${UI.fmtDate(st.finishedAt)} (${st.trigger === "schedule" ? "автоматично" : "вручну"}): ` +
+          `робочих <b style="color:var(--success)">${st.ok}</b> з ${st.total}` +
+          (st.transparent ? ` · прозорих (розкривають IP сервера) ${st.transparent}` : "");
+    } else {
+      line = "Після рестарту сервера перевірка ще не запускалась";
+    }
+    UI.setHtml("proxy-check-status", `${line}<br><span style="color:var(--text-2)">${next}</span>`);
+    return st;
+  } catch {
+    return null;
+  }
+};
+
+const resetProxyErrors = async () => {
+  if (!UI.confirm("Обнулити лічильники помилок усіх проксі і зняти бан? Статус уточнить наступна перевірка.")) return;
+  try {
+    const r = await API.proxies.resetErrors();
+    UI.toast(`Скинуто помилки: ${r.reset}, знято бан: ${r.unbanned}`, "success");
+    loadProxies();
+  } catch (err) {
+    UI.toast(err.message, "error");
+  }
+};
+
+const deleteDeadProxies = async () => {
+  const dead = state.proxies.filter((p) => p.status === "inactive" || p.status === "banned").length;
+  if (!UI.confirm(`Видалити всі неробочі проксі (inactive + banned)?${dead ? ` На цій сторінці таких: ${dead}.` : ""} Дію не можна скасувати.`)) return;
+  try {
+    const r = await API.proxies.deleteDead();
+    UI.toast(`Видалено проксі: ${r.deleted}`, "success");
+    loadProxies();
+  } catch (err) {
+    UI.toast(err.message, "error");
+  }
+};
+
+/** Поки перевірка йде — оновлюємо таблицю і прогрес кожні 3с. */
+const pollProxyCheck = () => {
+  const stop = () => {
+    clearInterval(_proxyCheckPoll);
+    _proxyCheckPoll = null;
+  };
+  stop();
+  _proxyCheckPoll = setInterval(async () => {
+    if (state.currentPage !== "proxies") return stop();
+    const st = await renderProxyCheckStatus();
+    await loadProxies();
+    if (st && !st.running) stop();
+  }, 3000);
 };
 
 const renderProxiesTable = ({ items, total, page, pages }) => {
@@ -3207,7 +3287,12 @@ const renderProxiesTable = ({ items, total, page, pages }) => {
       <td><code>${p.protocol.toUpperCase()}://${p.host}:${p.port}</code></td>
       <td><strong>${p.country ? p.country : "—"}</strong></td>
       <td><span style="color:${p.responseTime < 1000 ? "#22c55e" : p.responseTime < 5000 ? "#eab308" : "#ef4444"}">${p.responseTime ? p.responseTime + "ms" : "—"}</span></td>
-      <td>${UI.badge(p.status)}</td>
+      <td>
+        ${UI.badge(p.status)}
+        ${p.transparent ? '<span class="badge badge-warning" title="Проксі передає сайту реальний IP сервера — від блокувань не захищає, у ротацію не потрапляє">прозорий</span>' : ""}
+        ${p.lastError && p.status !== "active" ? `<div style="font-size:11px;color:var(--danger);margin-top:2px;max-width:260px;word-break:break-word" title="${escHtml(p.lastError)}">${escHtml(p.lastError.slice(0, 80))}</div>` : ""}
+        ${p.exitIp && p.status === "active" ? `<div style="font-size:11px;color:var(--text-2);margin-top:2px">IP ${escHtml(p.exitIp)}</div>` : ""}
+      </td>
       <td style="font-size:12px;color:#94a3b8">${p.useCount || 0}</td>
       <td style="font-size:12px;color:#94a3b8">${p.failCount || 0}</td>
       <td style="font-size:11px;color:#94a3b8">${UI.fmtDate(p.lastChecked)}</td>
@@ -3872,18 +3957,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   document
     .getElementById("btn-check-all-proxies")
     ?.addEventListener("click", async () => {
-      await API.proxies.checkAll();
-      UI.toast("Перевірку проксі розпочато...", "info");
-      // Оновлюємо таблицю кожні 3с поки відкрита сторінка проксі
-      const pollInterval = setInterval(async () => {
-        if (state.currentPage !== "proxies") {
-          clearInterval(pollInterval);
-          return;
-        }
-        await loadProxies();
-      }, 3000);
-      // Зупиняємо через 3 хвилини
-      setTimeout(() => clearInterval(pollInterval), 3 * 60 * 1000);
+      try {
+        await API.proxies.checkAll();
+        UI.toast("Перевірку проксі розпочато...", "info");
+      } catch (err) {
+        UI.toast(err.message, err.status === 409 ? "warning" : "error");
+      }
+      pollProxyCheck();
     });
 
   // Results run selector

@@ -660,8 +660,12 @@
             >
               ↺ Оновити
             </button>
-            <button class="btn btn-danger btn-sm" onclick="clearAllErrors()">
-              Очистити все
+            <button
+              class="btn btn-danger btn-sm"
+              onclick="clearAllErrors()"
+              title="Видаляє помилки з урахуванням вибраного типу і сайту; без фільтрів — усі"
+            >
+              Очистити
             </button>
           </div>
 
@@ -772,6 +776,20 @@
               <button id="btn-check-all-proxies" class="btn btn-ghost btn-sm">
                 Перевірити всі
               </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                onclick="resetProxyErrors()"
+                title="Обнулити лічильники помилок і зняти бан (banned → inactive). Статус уточнить наступна перевірка."
+              >
+                Скинути помилки
+              </button>
+              <button
+                class="btn btn-danger btn-sm"
+                onclick="deleteDeadProxies()"
+                title="Видалити всі проксі зі статусом inactive або banned"
+              >
+                Видалити неробочі
+              </button>
               <button id="btn-import-proxy-open" class="btn btn-primary">
                 + Імпорт проксі
               </button>
@@ -801,13 +819,19 @@
               >
                 —
               </div>
-              <div class="stat-label">Заблоковано</div>
+              <div class="stat-label">Неробочих</div>
             </div>
             <div class="stat-card">
               <div class="stat-val" id="proxy-stat-avgtime">—</div>
               <div class="stat-label">Середній відгук</div>
             </div>
           </div>
+
+          <div
+            id="proxy-check-status"
+            class="card"
+            style="padding: 10px 16px; margin-bottom: 16px; font-size: 13px"
+          ></div>
 
           <div class="card">
             <div class="table-wrap">

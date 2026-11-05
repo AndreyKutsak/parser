@@ -179,10 +179,12 @@ exports.remove = async (req, res, next) => {
   }
 };
 
-/** DELETE /api/errors?kind=site — очистити всі події (або лише одного типу). */
+/** DELETE /api/errors?kind=site&domain=detels.com.ua — очистити всі події або лише відфільтровані. */
 exports.clear = async (req, res, next) => {
   try {
-    const filter = KINDS.includes(req.query.kind) ? { kind: kindMatch(req.query.kind) } : {};
+    const filter = {};
+    if (KINDS.includes(req.query.kind)) filter.kind = kindMatch(req.query.kind);
+    if (req.query.domain) filter.domain = String(req.query.domain);
     const { deletedCount } = await ErrorLog.deleteMany(filter);
     res.json({ success: true, deleted: deletedCount });
   } catch (err) {

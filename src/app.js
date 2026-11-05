@@ -6,6 +6,7 @@ require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 const { connect } = require("./db/connection");
 const scheduler = require("./core/scheduler/scheduler.service");
 const subTaskScheduler = require("./core/subtask/subtask.scheduler");
+const proxyScheduler = require("./core/proxy/proxy.scheduler");
 const queueManager = require("./queue/queue.manager");
 const logger = require("./utils/logger");
 const eventBridge = require("./utils/event-bridge");
@@ -24,6 +25,7 @@ async function start() {
     scheduler.start();
     await scheduler.loadFromDatabase();
     subTaskScheduler.start();
+    proxyScheduler.start();
     memoryReporter.startReporting("app");
     app.listen(PORT, () => {
       logger.info(`Web Parser Pro running on http://localhost:${PORT}`);
@@ -39,6 +41,7 @@ async function shutdown(signal) {
   logger.info(`${signal} received - shutting down gracefully`);
   scheduler.stop();
   subTaskScheduler.stop();
+  proxyScheduler.stop();
   await queueManager.close();
   process.exit(0);
 }

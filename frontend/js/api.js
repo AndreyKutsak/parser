@@ -192,7 +192,7 @@ const API = (() => {
     sites: (p = {}) => request("GET", "/errors/sites?" + new URLSearchParams(p)),
     get: (fp) => request("GET", `/errors/${encodeURIComponent(fp)}`),
     remove: (fp) => request("DELETE", `/errors/${encodeURIComponent(fp)}`),
-    clear: (kind) => request("DELETE", "/errors" + (kind ? `?kind=${kind}` : "")),
+    clear: (p = {}) => request("DELETE", "/errors?" + new URLSearchParams(p)),
   };
 
   // ── Proxies ───────────────────────────────────────────────────────
@@ -203,6 +203,9 @@ const API = (() => {
     delete: (id) => request("DELETE", `/proxies/${id}`),
     check: (id) => request("POST", `/proxies/${id}/check`),
     checkAll: () => request("POST", "/proxies/check-all"),
+    checkStatus: () => request("GET", "/proxies/check-status"),
+    resetErrors: () => request("POST", "/proxies/reset-errors"),
+    deleteDead: () => request("POST", "/proxies/delete-dead"),
     stats: () => request("GET", "/proxies/stats"),
   };
 
