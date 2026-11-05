@@ -189,9 +189,10 @@ const API = (() => {
   const errors = {
     list: (p = {}) => request("GET", "/errors?" + new URLSearchParams(p)),
     summary: () => request("GET", "/errors?summaryOnly=1"),
+    sites: (p = {}) => request("GET", "/errors/sites?" + new URLSearchParams(p)),
     get: (fp) => request("GET", `/errors/${encodeURIComponent(fp)}`),
     remove: (fp) => request("DELETE", `/errors/${encodeURIComponent(fp)}`),
-    clear: () => request("DELETE", "/errors"),
+    clear: (kind) => request("DELETE", "/errors" + (kind ? `?kind=${kind}` : "")),
   };
 
   // ── Proxies ───────────────────────────────────────────────────────

@@ -57,6 +57,11 @@ function createApp() {
         success: false,
         message: "Too many requests, please slow down",
       },
+      // Фіксуємо кожну відмову 429 на сторінці "Помилки" (видно, який клієнт упирається в ліміт)
+      handler: (req, res, next, options) => {
+        require("../utils/error-store").recordApiRateLimit(req);
+        res.status(options.statusCode).json(options.message);
+      },
     }),
   );
 

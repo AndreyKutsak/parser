@@ -1,6 +1,7 @@
 const ErrorLog = require('../../db/models/error-log.model');
 
 const PERIODS = { '1h': 3600e3, '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3 };
+const KINDS = ['server', 'site', 'api'];
 
 const sinceFor = (period) => new Date(Date.now() - (PERIODS[period] || PERIODS['24h']));
 // Бакети погодинні, тому для фільтра беремо початок години, у яку потрапляє межа періоду
@@ -8,36 +9,52 @@ const hourFloor = (d) => { const h = new Date(d); h.setUTCMinutes(0, 0, 0); retu
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Кількість помилок за 1 год / 24 год / 7 днів (для карток і бейджа в меню). */
+// Записи до появи поля kind — це помилки сервера ($in з null ловить відсутнє поле)
+const kindMatch = (kind) => (kind === 'server' ? { $in: ['server', null] } : kind);
+
+/** Кількість подій за 1 год / 24 год / 7 днів — загалом і по кожному типу. */
 const summary = async () => {
   const now = Date.now();
-  const [row] = await ErrorLog.aggregate([
+  const rows = await ErrorLog.aggregate([
     { $match: { lastAt: { $gte: new Date(now - PERIODS['7d']) } } },
     {
       $group: {
-        _id: null,
+        _id: { $ifNull: ['$kind', 'server'] },
         h1:  { $sum: { $cond: [{ $gte: ['$hour', hourFloor(now - PERIODS['1h'])] }, '$count', 0] } },
         h24: { $sum: { $cond: [{ $gte: ['$hour', hourFloor(now - PERIODS['24h'])] }, '$count', 0] } },
         d7:  { $sum: '$count' },
       },
     },
   ]);
-  return { h1: row?.h1 || 0, h24: row?.h24 || 0, d7: row?.d7 || 0 };
+  const byKind = Object.fromEntries(KINDS.map((k) => [k, { h1: 0, h24: 0, d7: 0 }]));
+  rows.forEach((r) => { byKind[r._id] = { h1: r.h1, h24: r.h24, d7: r.d7 }; });
+  const total = (f) => KINDS.reduce((n, k) => n + byKind[k][f], 0);
+  return { h1: total('h1'), h24: total('h24'), d7: total('d7'), byKind };
+};
+
+const buildMatch = (query, defaultPeriod = '24h') => {
+  const period = PERIODS[query.period] ? query.period : defaultPeriod;
+  const match = { hour: { $gte: hourFloor(sinceFor(period)) } };
+  if (KINDS.includes(query.kind)) match.kind = kindMatch(query.kind);
+  if (query.process) match.process = String(query.process);
+  if (query.domain) match.domain = String(query.domain);
+  if (query.q) {
+    const rx = { $regex: escapeRegex(String(query.q).slice(0, 100)), $options: 'i' };
+    match.$or = [{ message: rx }, { domain: rx }];
+  }
+  return { period, match };
 };
 
 /**
- * GET /api/errors?period=24h&process=app&q=redis
- * Згруповані помилки за період: кількість, перша/остання поява, процеси, останній приклад.
+ * GET /api/errors?period=24h&kind=site&process=app&domain=detels.com.ua&q=429
+ * Згруповані події за період: кількість, перша/остання поява, процеси, останній приклад.
  * ?summaryOnly=1 — лише лічильники (для бейджа в меню).
  */
 exports.list = async (req, res, next) => {
   try {
     if (req.query.summaryOnly) return res.json({ success: true, summary: await summary() });
 
-    const period = PERIODS[req.query.period] ? req.query.period : '24h';
-    const match = { hour: { $gte: hourFloor(sinceFor(period)) } };
-    if (req.query.process) match.process = String(req.query.process);
-    if (req.query.q) match.message = { $regex: escapeRegex(String(req.query.q).slice(0, 100)), $options: 'i' };
+    const { period, match } = buildMatch(req.query);
 
     const [groups, processes, sum] = await Promise.all([
       ErrorLog.aggregate([
@@ -46,6 +63,9 @@ exports.list = async (req, res, next) => {
         {
           $group: {
             _id: '$fingerprint',
+            kind:      { $first: { $ifNull: ['$kind', 'server'] } },
+            domain:    { $first: '$domain' },
+            status:    { $first: '$status' },
             message:   { $first: '$message' },
             count:     { $sum: '$count' },
             firstAt:   { $min: '$firstAt' },
@@ -55,7 +75,7 @@ exports.list = async (req, res, next) => {
           },
         },
         { $sort: { lastAt: -1 } },
-        { $limit: 200 },
+        { $limit: 300 },
       ]),
       ErrorLog.distinct('process'),
       summary(),
@@ -66,7 +86,51 @@ exports.list = async (req, res, next) => {
       period,
       summary: sum,
       processes,
-      groups: groups.map((g) => ({ fingerprint: g._id, ...g, _id: undefined })),
+      groups: groups.map(({ _id, ...g }) => ({ fingerprint: _id, ...g })),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/errors/sites?period=24h
+ * Зведення по сайтах: скільки помилок на кожному домені й з якими кодами.
+ * Головне питання — де нас блокують (403/429/таймаути).
+ */
+exports.sites = async (req, res, next) => {
+  try {
+    const { period, match } = buildMatch({ ...req.query, kind: 'site' });
+    const rows = await ErrorLog.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: { domain: '$domain', code: { $ifNull: [{ $toString: '$status' }, { $arrayElemAt: ['$samples.meta.code', -1] }] } },
+          count:  { $sum: '$count' },
+          lastAt: { $max: '$lastAt' },
+        },
+      },
+      {
+        $group: {
+          _id: '$_id.domain',
+          total:  { $sum: '$count' },
+          lastAt: { $max: '$lastAt' },
+          codes:  { $push: { code: '$_id.code', count: '$count' } },
+        },
+      },
+      { $sort: { total: -1 } },
+      { $limit: 200 },
+    ]);
+
+    res.json({
+      success: true,
+      period,
+      sites: rows.map((r) => ({
+        domain: r._id,
+        total: r.total,
+        lastAt: r.lastAt,
+        codes: r.codes.sort((a, b) => b.count - a.count),
+      })),
     });
   } catch (err) {
     next(err);
@@ -115,10 +179,11 @@ exports.remove = async (req, res, next) => {
   }
 };
 
-/** DELETE /api/errors — очистити всі помилки. */
+/** DELETE /api/errors?kind=site — очистити всі події (або лише одного типу). */
 exports.clear = async (req, res, next) => {
   try {
-    const { deletedCount } = await ErrorLog.deleteMany({});
+    const filter = KINDS.includes(req.query.kind) ? { kind: kindMatch(req.query.kind) } : {};
+    const { deletedCount } = await ErrorLog.deleteMany(filter);
     res.json({ success: true, deleted: deletedCount });
   } catch (err) {
     next(err);

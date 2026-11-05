@@ -9,6 +9,7 @@ router.get('/monitor', requireAuth, require('../controllers/monitor.controller')
 
 const errorsCtrl = require('../controllers/errors.controller');
 router.get('/errors',                requireAuth, errorsCtrl.list);
+router.get('/errors/sites',          requireAuth, errorsCtrl.sites);
 router.get('/errors/:fingerprint',   requireAuth, errorsCtrl.get);
 router.delete('/errors/:fingerprint', requireAuth, errorsCtrl.remove);
 router.delete('/errors',             requireAuth, errorsCtrl.clear);

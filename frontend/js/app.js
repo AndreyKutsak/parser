@@ -538,6 +538,10 @@ const fmtAgo = (d) => {
 const errorContext = (meta) => {
   if (!meta) return "";
   const parts = [];
+  if (meta.url) parts.push(meta.url);
+  if (meta.ip) parts.push(`IP ${meta.ip}`);
+  if (meta.engine) parts.push(meta.engine);
+  if (meta.proxy) parts.push(`проксі ${meta.proxy}`);
   if (meta.method && meta.path) parts.push(`${meta.method} ${meta.path}`);
   if (meta.status) parts.push(`HTTP ${meta.status}`);
   if (meta.taskId) parts.push(`task ${meta.taskId}`);
@@ -550,7 +554,10 @@ const updateErrorsBadge = (summary) => {
   const el = document.getElementById("nav-errors-badge");
   if (!el || !summary) return;
   el.textContent = summary.h24 > 999 ? "999+" : summary.h24;
-  el.title = `Помилок за 24 години: ${summary.h24}`;
+  const k = summary.byKind || {};
+  el.title =
+    `Подій за 24 години: ${summary.h24}\n` +
+    `сервер: ${k.server?.h24 ?? 0} · сайти: ${k.site?.h24 ?? 0} · наш API: ${k.api?.h24 ?? 0}`;
   el.classList.toggle("hidden", !summary.h24);
 };
 
@@ -564,20 +571,94 @@ const startErrorsBadge = () => {
   setInterval(tick, 60000);
 };
 
+let _errorsDomain = "";
+
+const ERROR_KIND_BADGES = {
+  server: '<span class="badge badge-error" style="flex-shrink:0">сервер</span>',
+  site: '<span class="badge badge-warning" style="flex-shrink:0">сайт</span>',
+  api: '<span class="badge badge-running" style="flex-shrink:0">наш API</span>',
+};
+
+/** Колір чипа коду: 403/429 — блокування (червоний), 5xx/мережа — жовтий, решта 4xx — сірий. */
+const errorCodeChip = (code, count) => {
+  const c = String(code || "?");
+  const cls = c === "403" || c === "429" ? "badge-error" : /^4/.test(c) ? "badge-idle" : "badge-warning";
+  return `<span class="badge ${cls}" style="margin:2px">${escHtml(c)} × ${count.toLocaleString()}</span>`;
+};
+
+const setErrorsKind = (kind) => {
+  const sel = document.getElementById("errors-kind");
+  if (sel) sel.value = kind;
+  _errorsDomain = "";
+  loadErrors();
+};
+
+const setErrorsDomain = (domain) => {
+  _errorsDomain = domain;
+  const sel = document.getElementById("errors-kind");
+  if (sel && domain) sel.value = "site";
+  loadErrors();
+  document.getElementById("errors-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const loadErrorSites = async (period) => {
+  try {
+    const { sites } = await API.errors.sites({ period });
+    UI.setHtml("errors-sites-count", sites.length);
+    UI.setHtml(
+      "errors-sites",
+      sites.length
+        ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="text-align:left;color:var(--text-2);font-size:12px">
+              <th style="padding:8px 16px">Сайт</th><th style="padding:8px">Помилок</th>
+              <th style="padding:8px">Коди</th><th style="padding:8px 16px">Остання</th>
+            </tr></thead>
+            <tbody>${sites
+              .map((s) => {
+                const blocked = s.codes.some((c) => c.code === "403" || c.code === "429");
+                return `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="setErrorsDomain('${escHtml(s.domain).replace(/'/g, "\\'")}')" title="Показати помилки цього сайту">
+                  <td style="padding:8px 16px;font-weight:500;word-break:break-all">${blocked ? "⛔ " : ""}${escHtml(s.domain)}</td>
+                  <td style="padding:8px;font-weight:600">${s.total.toLocaleString()}</td>
+                  <td style="padding:8px">${s.codes.map((c) => errorCodeChip(c.code, c.count)).join("")}</td>
+                  <td style="padding:8px 16px;white-space:nowrap" title="${UI.fmtDate(s.lastAt)}">${fmtAgo(s.lastAt)}</td>
+                </tr>`;
+              })
+              .join("")}</tbody></table></div>`
+        : '<div class="empty-state" style="padding:16px">Сайти не повертали помилок за цей період</div>',
+    );
+  } catch (err) {
+    UI.setHtml("errors-sites", `<div class="empty-state" style="padding:16px;color:var(--danger)">${escHtml(err.message)}</div>`);
+  }
+};
+
 const loadErrors = async () => {
   clearInterval(_errorsRefreshTimer);
   const period = document.getElementById("errors-period")?.value || "24h";
+  const kind = document.getElementById("errors-kind")?.value || "";
   const proc = document.getElementById("errors-process")?.value || "";
   const q = document.getElementById("errors-search")?.value.trim() || "";
 
+  loadErrorSites(period);
+
+  UI.setHtml(
+    "errors-domain-filter",
+    _errorsDomain
+      ? `<span class="badge badge-warning">сайт: ${escHtml(_errorsDomain)}
+           <a href="#" style="margin-left:4px;color:inherit" onclick="event.preventDefault(); setErrorsDomain('')">✕</a></span>`
+      : "",
+  );
+
   try {
     const params = { period };
+    if (kind) params.kind = kind;
     if (proc) params.process = proc;
     if (q) params.q = q;
+    if (_errorsDomain) params.domain = _errorsDomain;
     const { summary, processes, groups } = await API.errors.list(params);
 
-    UI.setHtml("errors-stat-h1", summary.h1.toLocaleString());
-    UI.setHtml("errors-stat-h24", summary.h24.toLocaleString());
+    UI.setHtml("errors-stat-server", summary.byKind.server.h24.toLocaleString());
+    UI.setHtml("errors-stat-site", summary.byKind.site.h24.toLocaleString());
+    UI.setHtml("errors-stat-api", summary.byKind.api.h24.toLocaleString());
     UI.setHtml("errors-stat-d7", summary.d7.toLocaleString());
     updateErrorsBadge(summary);
 
@@ -601,6 +682,7 @@ const loadErrors = async () => {
             <div class="flex-gap" style="padding:10px 16px;align-items:flex-start;gap:12px;cursor:pointer"
                  onclick="toggleErrorGroup('${g.fingerprint}')">
               <span class="badge badge-error" style="flex-shrink:0;min-width:44px;text-align:center" title="Кількість за період">×${g.count.toLocaleString()}</span>
+              ${ERROR_KIND_BADGES[g.kind] || ""}
               <div style="flex:1;min-width:0">
                 <div style="font-weight:500;font-size:13px;word-break:break-word">${escHtml(g.message || "(без повідомлення)")}</div>
                 ${ctx ? `<div style="font-size:12px;color:var(--text-2);margin-top:2px;word-break:break-word">${escHtml(ctx.slice(0, 300))}</div>` : ""}
@@ -707,9 +789,11 @@ const removeErrorGroup = async (fp) => {
 };
 
 const clearAllErrors = async () => {
-  if (!UI.confirm("Видалити всі збережені помилки?")) return;
+  const kind = document.getElementById("errors-kind")?.value || "";
+  const label = { server: "помилки сервера", site: "помилки сайтів", api: "відмови API" }[kind] || "усі збережені помилки";
+  if (!UI.confirm(`Видалити ${label}?`)) return;
   try {
-    const { deleted } = await API.errors.clear();
+    const { deleted } = await API.errors.clear(kind);
     UI.toast(`Видалено записів: ${deleted}`, "success");
     _openErrorGroups.clear();
     loadErrors();

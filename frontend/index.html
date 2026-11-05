@@ -651,7 +651,7 @@
             <div>
               <div class="section-title">Помилки сервера</div>
               <p class="section-sub">
-                Помилки процесів app і parser.worker, згруповані за типом
+                Помилки сервера, відповіді сайтів з кодами помилок і відмови нашого API
               </p>
             </div>
             <button
@@ -666,17 +666,38 @@
           </div>
 
           <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-val" id="errors-stat-h1">—</div>
-              <div class="stat-label">За останню годину</div>
+            <div class="stat-card" style="cursor: pointer" onclick="setErrorsKind('server')">
+              <div class="stat-val" id="errors-stat-server">—</div>
+              <div class="stat-label">Помилки сервера за 24 год</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-val" id="errors-stat-h24">—</div>
-              <div class="stat-label">За 24 години</div>
+            <div class="stat-card" style="cursor: pointer" onclick="setErrorsKind('site')">
+              <div class="stat-val" id="errors-stat-site">—</div>
+              <div class="stat-label">Помилки сайтів за 24 год (4xx/5xx, таймаути)</div>
+            </div>
+            <div class="stat-card" style="cursor: pointer" onclick="setErrorsKind('api')">
+              <div class="stat-val" id="errors-stat-api">—</div>
+              <div class="stat-label">Відмов нашого API (429) за 24 год</div>
             </div>
             <div class="stat-card">
               <div class="stat-val" id="errors-stat-d7">—</div>
-              <div class="stat-label">За 7 днів</div>
+              <div class="stat-label">Усього за 7 днів</div>
+            </div>
+          </div>
+
+          <!-- Сайти з помилками: де нас блокують -->
+          <div class="card" style="margin-bottom: 16px">
+            <div
+              class="card-header"
+              style="display: flex; align-items: center; gap: 8px"
+            >
+              Сайти з помилками
+              <span id="errors-sites-count" class="badge badge-error">0</span>
+              <span style="margin-left: auto; font-size: 12px; color: var(--text-2)">
+                <span class="badge badge-error">403 / 429</span> — ймовірне блокування
+              </span>
+            </div>
+            <div id="errors-sites">
+              <div class="empty-state" style="padding: 16px">Немає даних</div>
             </div>
           </div>
 
@@ -687,7 +708,19 @@
             >
               Типи помилок
               <span id="errors-groups-count" class="badge badge-error">0</span>
+              <span id="errors-domain-filter"></span>
               <div style="margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap">
+                <select
+                  id="errors-kind"
+                  class="form-control"
+                  style="width: auto; padding: 4px 8px"
+                  onchange="loadErrors()"
+                >
+                  <option value="">Усі типи</option>
+                  <option value="server">Помилки сервера</option>
+                  <option value="site">Помилки сайтів</option>
+                  <option value="api">Ліміт нашого API (429)</option>
+                </select>
                 <select
                   id="errors-period"
                   class="form-control"

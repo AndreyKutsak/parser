@@ -323,4 +323,9 @@ const autoScroll = async (page) => {
   await new Promise(r => setTimeout(r, 1000));
 };
 
-module.exports = { fetchPage, launchBrowser, closeAll };
+// Обгортка фіксує відповіді сайтів 4xx/5xx і таймаути на сторінці "Помилки" (поведінка не змінюється)
+module.exports = {
+  fetchPage: require('../../../utils/error-store').wrapFetch(fetchPage, 'dynamic'),
+  launchBrowser,
+  closeAll,
+};
