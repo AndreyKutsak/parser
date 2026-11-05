@@ -47,8 +47,10 @@ class QueueManager {
       lazyConnect: true,
       enableOfflineQueue: false,
       maxRetriesPerRequest: 0,
-      retryStrategy: () => null,
-      reconnectOnError: () => false,
+      // Завжди перепідключатися з backoff (як у parser.worker). Раніше тут було `() => null`:
+      // після рестарту Redis з'єднання закривалось назавжди, і кожен addJob падав з
+      // "Connection is closed." до ручного `pm2 restart app` — планові задачі мовчки не запускались.
+      retryStrategy: (times) => Math.min(times * 1000, 10000),
       connectTimeout: 3000,
     };
 
@@ -65,14 +67,34 @@ class QueueManager {
         connection,
         defaultJobOptions: JOB_DEFAULTS,
       });
-      staticQueue.on("error", () => {});
-      dynamicQueue.on("error", () => {});
+      // Логуємо тільки першу помилку після кожного розриву, щоб не спамити під час перепідключення.
+      let redisDown = false;
+      const onError = (err) => {
+        if (redisDown) return;
+        redisDown = true;
+        logger.error("Queue lost connection to Redis — reconnecting", { error: err?.message });
+      };
+      staticQueue.on("error", onError);
+      dynamicQueue.on("error", onError);
 
       queueEvents = new BullMQ.QueueEvents(STATIC_QUEUE, { connection });
       queueEvents.on("error", () => {});
 
-      // Test connection
-      await staticQueue.getJobCounts();
+      // Test connection. Через нескінченний retryStrategy BullMQ чекав би на Redis вічно,
+      // тому обмежуємо перевірку таймаутом, щоб зберегти fallback у синхронний режим при старті.
+      let timer;
+      await Promise.race([
+        staticQueue.getJobCounts(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Redis connection timeout")), 5000);
+        }),
+      ]).finally(() => clearTimeout(timer));
+
+      (await staticQueue.client).on("ready", () => {
+        if (!redisDown) return;
+        redisDown = false;
+        logger.info("Queue reconnected to Redis");
+      });
 
       this.staticQueue = staticQueue;
       this.dynamicQueue = dynamicQueue;

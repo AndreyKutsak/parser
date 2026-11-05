@@ -26,6 +26,21 @@ const looksLikeLoginRedirect = (originalUrl, finalUrl) => {
   }
 };
 
+const UPSTREAM_NETWORK_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT', 'ECONNABORTED',
+]);
+const classifyUpstreamError = (err) => {
+  const msg = err?.message || '';
+  // Playwright: TimeoutError ("page.goto: Timeout 20000ms exceeded"); axios: ECONNABORTED/ETIMEDOUT
+  if (err?.name === 'TimeoutError' || /Timeout \d+ms exceeded/.test(msg) || err?.code === 'ECONNABORTED' || err?.code === 'ETIMEDOUT') {
+    return { status: 504, message: 'Сайт не відповів вчасно (таймаут завантаження сторінки)' };
+  }
+  if (UPSTREAM_NETWORK_CODES.has(err?.code) || /net::ERR_/.test(msg)) {
+    return { status: 502, message: 'Не вдалося з\'єднатися з сайтом' };
+  }
+  return null;
+};
+
 // /api/tasks/preview завжди виконується прямо в цьому процесі (app.js, 256MB heap) — на відміну
 // від звичайних завдань, які йдуть через чергу в parser.worker. Без ліміту одночасних викликів
 // паралельні (або щільно послідовні від зовнішніх cron-скриптів) preview-запити з engine=dynamic
@@ -178,6 +193,18 @@ exports.preview = async (req, res, next) => {
     });
   } catch (err) {
     logger.warn('Preview parse: помилка', { url: req.body?.url, error: err.message });
+
+    // Проблеми на боці цільового сайту (таймаут, відмова з'єднання) — це не помилка нашого сервера,
+    // тож віддаємо 504/502 з зрозумілим повідомленням замість 500 з глобального обробника.
+    const upstream = classifyUpstreamError(err);
+    if (upstream) {
+      return res.status(upstream.status).json({
+        success: false,
+        upstreamError: true,
+        message: upstream.message,
+        error: err.message.split('\n')[0],
+      });
+    }
     next(err);
   } finally {
     activePreviewCount--;
