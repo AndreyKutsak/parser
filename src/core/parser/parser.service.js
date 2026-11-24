@@ -292,6 +292,17 @@ class ParserService {
     // Кеш і лічильники follow-полів у режимі «вибір за збігом» (спільні для всіх сторінок прогону)
     const matchCache = new Map();
     const matchStats = { requests: 0, cacheHits: 0, notFound: 0 };
+    // Колонки з датою перевірки (правила `[…].@now`) — оновлюються і в незмінених записах
+    const nowKeys = [];
+    {
+      const fm = task.selectors?.fields;
+      const entries = fm instanceof Map ? [...fm.entries()] : Object.entries(fm || {});
+      for (const [fieldName, cfg] of entries) {
+        for (const r of parseMatchFields(cfg?.jsonFields) || []) {
+          if (r.valuePath === '@now') nowKeys.push(r.target(fieldName));
+        }
+      }
+    }
 
     logger.info("Запуск парсингу", {
       taskId: task._id,
@@ -866,6 +877,7 @@ class ParserService {
                 : Promise.resolve(new Map()),
             ]);
 
+            const touchUpdates = []; // незмінені записи: лише оновити дату перевірки (@now)
             for (const result of pageResults) {
               let oldResult = null;
               if (result.detailUrl) {
@@ -883,8 +895,16 @@ class ParserService {
                   result._hasChanges = true;
                 } else {
                   result._skip = true; // нічого не змінилось — не зберігаємо
+                  // Але дату перевірки (@now) оновлюємо в останньому збереженому записі
+                  const set = {};
+                  for (const k of nowKeys) if (result.data?.[k] != null) set[k] = result.data[k];
+                  if (oldResult._id && Object.keys(set).length) touchUpdates.push({ _id: oldResult._id, set });
                 }
               }
+            }
+            if (touchUpdates.length) {
+              await resultRepo.setDataFields(touchUpdates).catch((e) =>
+                logger.warn("Не вдалося оновити дату перевірки", { taskId: task._id, error: e.message }));
             }
           }
 

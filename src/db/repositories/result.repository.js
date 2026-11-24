@@ -76,6 +76,23 @@ class ResultRepository {
     ]);
   }
 
+  /**
+   * Оновлює окремі поля data в уже збережених записах (без нового запису).
+   * @param {Array<{ _id: any, set: object }>} updates - set: { "Кількість_оновлено": "2026-11-24 12:00:00" }
+   */
+  async setDataFields(updates) {
+    if (!updates.length) return null;
+    return Result.bulkWrite(
+      updates.map(({ _id, set }) => ({
+        updateOne: {
+          filter: { _id },
+          update: { $set: Object.fromEntries(Object.entries(set).map(([k, v]) => [`data.${k}`, v])) },
+        },
+      })),
+      { ordered: false },
+    );
+  }
+
   async insertMany(results) {
     if (!results.length) return [];
     return Result.insertMany(results, { ordered: false });
