@@ -790,6 +790,9 @@
               >
                 Видалити неробочі
               </button>
+              <button class="btn btn-ghost btn-sm" onclick="openVpnModal()">
+                + VPN (WireGuard)
+              </button>
               <button id="btn-import-proxy-open" class="btn btn-primary">
                 + Імпорт проксі
               </button>
@@ -1786,9 +1789,16 @@
                   cursor: pointer;
                 "
               >
-                <input type="checkbox" id="tf-proxy-enabled" /> Використовувати
-                ротацію проксі
+                <input type="checkbox" id="tf-proxy-enabled" onchange="toggleProxyChoice()" /> Використовувати
+                проксі / VPN
               </label>
+              <div id="tf-proxy-choice-wrap" style="display: none; margin-top: 8px">
+                <select id="tf-proxy-choice" class="form-control"></select>
+                <p class="form-hint">
+                  Ротація — кожен запуск і кожна повторна спроба бере наступний робочий зі списку.
+                  VPN додаються в розділі «Проксі» → «+ VPN (WireGuard)».
+                </p>
+              </div>
             </div>
 
             <!-- Webhook для сповіщень -->
@@ -1940,6 +1950,70 @@
           <button class="btn btn-primary" id="btn-import-proxies">
             Імпортувати
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО VPN (WireGuard)
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="vpn-modal">
+      <div class="modal" style="max-width: 620px">
+        <div class="modal-header">
+          <span id="vpn-modal-title">Додати VPN (WireGuard)</span>
+          <button class="btn-close" onclick="closeVpnModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="vpn-edit-id" />
+          <div class="form-group">
+            <label class="form-label">Назва</label>
+            <input id="vpn-name" class="form-control" placeholder="напр. Нідерланди, Амстердам" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">WireGuard-конфіг (.conf)</label>
+            <textarea
+              id="vpn-config"
+              class="form-control"
+              rows="12"
+              spellcheck="false"
+              style="font-family: var(--font-mono, monospace); font-size: 12px"
+              placeholder="[Interface]&#10;PrivateKey = …&#10;Address = 10.2.0.2/32&#10;DNS = 10.2.0.1&#10;&#10;[Peer]&#10;PublicKey = …&#10;AllowedIPs = 0.0.0.0/0&#10;Endpoint = 185.1.2.3:51820"
+            ></textarea>
+            <p class="form-hint" id="vpn-config-hint">
+              Вставте вміст файлу <code>.conf</code>, який видає VPN-сервіс для WireGuard.
+              Тунель піднімається лише для парсера: мережа сервера, SSH і сайт не змінюються.
+            </p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeVpnModal()">Скасувати</button>
+          <button class="btn btn-primary" id="btn-save-vpn" onclick="saveVpn()">Зберегти</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО ПЕРЕВІРКИ ПРОКСІ/VPN НА САЙТІ
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="site-check-modal">
+      <div class="modal" style="max-width: 620px">
+        <div class="modal-header">
+          <span id="site-check-title">Перевірка на сайті</span>
+          <button class="btn-close" onclick="document.getElementById('site-check-modal').classList.remove('open')">×</button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="site-check-id" />
+          <div class="form-group">
+            <label class="form-label">Адреса сторінки</label>
+            <div class="flex-gap">
+              <input id="site-check-url" class="form-control" placeholder="https://zapchasty.com.ua/" />
+              <button class="btn btn-primary" id="btn-run-site-check" onclick="runSiteCheck()">Перевірити</button>
+            </div>
+            <p class="form-hint">
+              Один запит через цей VPN/проксі і, для порівняння, один напряму з сервера.
+            </p>
+          </div>
+          <div id="site-check-result"></div>
         </div>
       </div>
     </div>

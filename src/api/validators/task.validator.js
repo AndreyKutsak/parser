@@ -95,6 +95,7 @@ const createTaskSchema = Joi.object({
   proxy: Joi.object({
     enabled: Joi.boolean().default(false),
     rotate: Joi.boolean().default(true),
+    pool: Joi.string().valid("all", "proxy", "vpn").default("all"),
     proxyId: Joi.string().hex().length(24).allow(null),
   }).default({}),
 
@@ -169,6 +170,7 @@ const previewSchema = Joi.object({
   proxy: Joi.object({
     enabled: Joi.boolean().default(false),
     rotate: Joi.boolean().default(true),
+    pool: Joi.string().valid("all", "proxy", "vpn").default("all"),
     proxyId: Joi.string().hex().length(24).allow(null).default(null),
   }).default({}),
 

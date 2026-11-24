@@ -2,7 +2,8 @@
  * Proxy Manager — handles proxy rotation, health tracking, and validation
  */
 const proxyRepo = require("../../db/repositories/proxy.repository");
-const { validateProxy, validateBatch, precheck } = require("./proxy.validator");
+const { validateProxy, validateBatch, precheck, checkSite } = require("./proxy.validator");
+const { validateWgConfig } = require("./wg-config");
 const logger = require("../../utils/logger");
 
 class ProxyManager {
@@ -19,15 +20,21 @@ class ProxyManager {
    * Get the next active proxy using round-robin rotation.
    * Falls back to DB if cache is stale.
    */
-  async getNextProxy() {
+  async getNextProxy(pool = "all") {
     await this._refreshCache();
 
-    if (!this._activeProxies.length) {
-      logger.warn("No active proxies available");
+    // pool: 'all' — проксі й VPN разом, 'proxy' — лише проксі, 'vpn' — лише VPN-тунелі
+    const list =
+      pool === "vpn" ? this._activeProxies.filter((p) => p.kind === "vpn")
+      : pool === "proxy" ? this._activeProxies.filter((p) => p.kind !== "vpn")
+      : this._activeProxies;
+
+    if (!list.length) {
+      logger.warn("No active proxies available", { pool });
       return null;
     }
 
-    const proxy = this._activeProxies[this._index % this._activeProxies.length];
+    const proxy = list[this._index % list.length];
     this._index++;
 
     // Update lastUsed asynchronously (don't block). Must NOT touch status/failCount —
@@ -62,6 +69,57 @@ class ProxyManager {
     });
     this._invalidateCache();
     return proxy;
+  }
+
+  /**
+   * Новий VPN (WireGuard). Тунель підніме vpn.daemon за кілька секунд; до першої успішної
+   * перевірки VPN має status=inactive і в ротацію не потрапляє.
+   */
+  async addVpn({ name, config, tags = [], note }) {
+    const { errors, endpoint } = validateWgConfig(config);
+    if (errors.length) throw Object.assign(new Error(errors.join("; ")), { statusCode: 400 });
+    const port = await proxyRepo.nextFreeVpnPort();
+    const proxy = await proxyRepo.create({
+      kind: "vpn",
+      name: name || endpoint,
+      host: "127.0.0.1",
+      port,
+      protocol: "socks5",
+      wgConfig: config,
+      vpnEndpoint: endpoint,
+      vpnEnabled: true,
+      vpnStatus: "starting",
+      status: "inactive",
+      tags,
+      note,
+    });
+    this._invalidateCache();
+    const obj = proxy.toObject();
+    delete obj.wgConfig;
+    return obj;
+  }
+
+  /** Змінити VPN: назву, конфіг (порожній — лишається старий), увімкнути/вимкнути. */
+  async updateVpn(id, { name, config, vpnEnabled, tags, note }) {
+    const proxy = await proxyRepo.findById(id);
+    if (!proxy || proxy.kind !== "vpn") throw Object.assign(new Error("VPN не знайдено"), { statusCode: 404 });
+    const set = {};
+    if (name !== undefined) set.name = name;
+    if (tags !== undefined) set.tags = tags;
+    if (note !== undefined) set.note = note;
+    if (config) {
+      const { errors, endpoint } = validateWgConfig(config);
+      if (errors.length) throw Object.assign(new Error(errors.join("; ")), { statusCode: 400 });
+      Object.assign(set, { wgConfig: config, vpnEndpoint: endpoint, vpnStatus: "starting", status: "inactive" });
+    }
+    if (vpnEnabled !== undefined) {
+      set.vpnEnabled = !!vpnEnabled;
+      set.vpnStatus = vpnEnabled ? "starting" : "stopped";
+      if (!vpnEnabled) set.status = "inactive";
+    }
+    const updated = await proxyRepo.update(id, set);
+    this._invalidateCache();
+    return updated;
   }
 
   /**
@@ -191,7 +249,9 @@ class ProxyManager {
         throw new Error(`Сервіс перевірки недоступний, перевірку скасовано: ${err.message}`);
       }
 
-      const { items: proxies } = await proxyRepo.findAll({ limit: 100000 });
+      const { items: all } = await proxyRepo.findAll({ limit: 100000 });
+      // Вимкнені VPN не перевіряємо — тунель зупинено, інакше накопичували б помилки до бану
+      const proxies = all.filter((p) => !(p.kind === "vpn" && p.vpnEnabled === false));
       st.total = proxies.length;
       logger.info(`Checking ${proxies.length} proxies...`, { trigger });
 
@@ -233,6 +293,27 @@ class ProxyManager {
     this._invalidateCache();
     const updatedProxy = await proxyRepo.findById(id);
     return { proxy: updatedProxy, ...result };
+  }
+
+  /**
+   * Перевірити проксі/VPN на конкретному сайті (напр. https://zapchasty.com.ua/).
+   * Результат зберігається в lastSiteCheck; статус проксі не змінює.
+   */
+  async checkSiteById(id, url) {
+    if (!/^https?:\/\/[^\s]+$/i.test(String(url || ""))) {
+      throw Object.assign(new Error("Вкажіть адресу сайту, що починається з http:// або https://"), { statusCode: 400 });
+    }
+    const proxy = await proxyRepo.findById(id);
+    if (!proxy) throw Object.assign(new Error("Проксі не знайдено"), { statusCode: 404 });
+    if (proxy.kind === "vpn" && proxy.vpnEnabled === false) {
+      throw Object.assign(new Error("VPN вимкнено — увімкніть його, щоб перевірити"), { statusCode: 409 });
+    }
+    const result = await checkSite(proxy, url);
+    const { via } = result;
+    await proxyRepo.update(id, {
+      lastSiteCheck: { url, ok: via.ok, status: via.status, responseTime: via.responseTime, title: via.title, blocked: via.blocked, error: via.error, at: new Date() },
+    });
+    return result;
   }
 
   async recordFailure(id) {

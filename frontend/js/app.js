@@ -982,6 +982,8 @@ const openTaskModal = (task = null) => {
     task?.schedule?.enabled || false;
   document.getElementById("tf-proxy-enabled").checked =
     task?.proxy?.enabled || false;
+  populateProxyChoice(task?.proxy || {});
+  toggleProxyChoice();
   document.getElementById("tf-crawl-enabled").checked =
     task?.options?.crawl?.enabled || false;
   document.getElementById("tf-crawl-options").style.display = task?.options
@@ -1965,7 +1967,7 @@ const saveTask = async () => {
       cron: g("tf-cron"),
     },
     requests: requestsList,
-    proxy: { enabled: gc("tf-proxy-enabled"), rotate: true },
+    proxy: readProxyChoice(),
     siteAuth: g("tf-site-auth") || null,
     subTasks: {
       enabled: gc("tf-subtasks-enabled"),
@@ -3445,8 +3447,15 @@ const renderProxiesTable = ({ items, total, page, pages }) => {
   const rows = items
     .map(
       (p) => `
-    <tr>
-      <td><code>${p.protocol.toUpperCase()}://${p.host}:${p.port}</code></td>
+    <tr${p.kind === "vpn" && p.vpnEnabled === false ? ' style="opacity:.55"' : ""}>
+      <td>
+        ${p.kind === "vpn"
+          ? `<span class="badge badge-running">VPN</span> <strong>${escHtml(p.name || "WireGuard")}</strong>
+             <div style="font-size:11px;color:var(--text-2);margin-top:2px">${escHtml(p.vpnEndpoint || "")} · локально socks5 :${p.port}</div>
+             ${vpnStateHtml(p)}`
+          : `<code>${p.protocol.toUpperCase()}://${p.host}:${p.port}</code>`}
+        ${siteCheckHtml(p)}
+      </td>
       <td><strong>${p.country ? p.country : "—"}</strong></td>
       <td><span style="color:${p.responseTime < 1000 ? "#22c55e" : p.responseTime < 5000 ? "#eab308" : "#ef4444"}">${p.responseTime ? p.responseTime + "ms" : "—"}</span></td>
       <td>
@@ -3460,7 +3469,11 @@ const renderProxiesTable = ({ items, total, page, pages }) => {
       <td style="font-size:11px;color:#94a3b8">${UI.fmtDate(p.lastChecked)}</td>
       <td>
         <div class="flex-gap">
-          <button class="btn btn-xs btn-primary" onclick="checkProxy('${p._id}')" title="Перевірити">✓</button>
+          <button class="btn btn-xs btn-primary" onclick="checkProxy('${p._id}')" title="Перевірити (вихідний IP, країна)">✓</button>
+          <button class="btn btn-xs btn-ghost" onclick="openSiteCheck('${p._id}')" title="Перевірити на конкретному сайті">Сайт</button>
+          ${p.kind === "vpn" ? `
+          <button class="btn btn-xs btn-ghost" onclick="openVpnModal('${p._id}')" title="Змінити назву або конфіг">✎</button>
+          <button class="btn btn-xs btn-ghost" onclick="toggleVpn('${p._id}', ${p.vpnEnabled === false})" title="${p.vpnEnabled === false ? "Увімкнути тунель" : "Вимкнути тунель"}">${p.vpnEnabled === false ? "▶" : "⏸"}</button>` : ""}
           <button class="btn btn-xs btn-danger" onclick="deleteProxy('${p._id}')">✕</button>
         </div>
       </td>
@@ -3509,6 +3522,177 @@ const deleteProxy = async (id) => {
   } catch (err) {
     UI.toast(err.message, "error");
   }
+};
+
+// ── VPN (WireGuard) ──────────────────────────────────────────────────────
+const VPN_STATE = {
+  starting: ["warning", "підключення…"],
+  running: ["active", "тунель працює"],
+  error: ["error", "помилка тунелю"],
+  stopped: ["idle", "вимкнено"],
+};
+
+const vpnStateHtml = (p) => {
+  const st = p.vpnEnabled === false ? "stopped" : p.vpnStatus || "starting";
+  const [cls, label] = VPN_STATE[st] || VPN_STATE.starting;
+  return `<div style="margin-top:3px"><span class="badge badge-${cls}">${label}</span>` +
+    (p.vpnError && st === "error" ? `<div style="font-size:11px;color:var(--danger);margin-top:2px;max-width:320px;word-break:break-word">${escHtml(p.vpnError.slice(0, 160))}</div>` : "") +
+    `</div>`;
+};
+
+const siteCheckHtml = (p) => {
+  const c = p.lastSiteCheck;
+  if (!c?.url) return "";
+  let host = c.url;
+  try { host = new URL(c.url).host; } catch { /* лишаємо як є */ }
+  const res = c.ok
+    ? `<span style="color:var(--success)">✓ ${c.status}, ${c.responseTime} мс</span>`
+    : `<span style="color:var(--danger)">✗ ${c.blocked ? `блокує (${c.status})` : escHtml(c.error || `HTTP ${c.status}`)}</span>`;
+  return `<div style="font-size:11px;color:var(--text-2);margin-top:2px" title="${escHtml(c.url)} · ${UI.fmtDate(c.at)}">${escHtml(host)}: ${res}</div>`;
+};
+
+const openVpnModal = (id = null) => {
+  const p = id ? state.proxies.find((x) => x._id === id) : null;
+  document.getElementById("vpn-edit-id").value = id || "";
+  document.getElementById("vpn-name").value = p?.name || "";
+  document.getElementById("vpn-config").value = "";
+  document.getElementById("vpn-modal-title").textContent = p ? `VPN: ${p.name || p.vpnEndpoint}` : "Додати VPN (WireGuard)";
+  document.getElementById("vpn-config-hint").innerHTML = p
+    ? "Конфіг збережено на сервері й не показується (там приватний ключ). Вставте новий, лише якщо треба замінити; порожнє поле — лишається старий."
+    : "Вставте вміст файлу <code>.conf</code>, який видає VPN-сервіс для WireGuard. Тунель піднімається лише для парсера: мережа сервера, SSH і сайт не змінюються.";
+  document.getElementById("vpn-modal").classList.add("open");
+};
+
+const closeVpnModal = () => document.getElementById("vpn-modal").classList.remove("open");
+
+const saveVpn = async () => {
+  const id = document.getElementById("vpn-edit-id").value;
+  const name = document.getElementById("vpn-name").value.trim();
+  const config = document.getElementById("vpn-config").value.trim();
+  if (!id && !config) return UI.toast("Вставте WireGuard-конфіг", "warning");
+  const btn = document.getElementById("btn-save-vpn");
+  UI.loading(btn, true);
+  try {
+    if (id) await API.proxies.updateVpn(id, { name, ...(config ? { config } : {}) });
+    else await API.proxies.createVpn({ name, config });
+    UI.toast(id ? "VPN збережено" : "VPN додано — тунель підключиться за кілька секунд", "success");
+    closeVpnModal();
+    loadProxies();
+    setTimeout(() => state.currentPage === "proxies" && loadProxies(), 8000); // оновити статус тунелю
+  } catch (err) {
+    UI.toast(err.message, "error");
+  } finally {
+    UI.loading(btn, false);
+  }
+};
+
+const toggleVpn = async (id, enable) => {
+  try {
+    await API.proxies.updateVpn(id, { vpnEnabled: enable });
+    UI.toast(enable ? "VPN увімкнено — підключення…" : "VPN вимкнено", "success");
+    loadProxies();
+    if (enable) setTimeout(() => state.currentPage === "proxies" && loadProxies(), 8000);
+  } catch (err) {
+    UI.toast(err.message, "error");
+  }
+};
+
+const openSiteCheck = (id) => {
+  const p = state.proxies.find((x) => x._id === id);
+  document.getElementById("site-check-id").value = id;
+  document.getElementById("site-check-title").textContent =
+    `Перевірка на сайті: ${p?.kind === "vpn" ? `VPN ${p.name || p.vpnEndpoint}` : `${p?.host}:${p?.port}`}`;
+  let last = "";
+  try { last = localStorage.getItem("siteCheckUrl") || ""; } catch { /* приватний режим */ }
+  document.getElementById("site-check-url").value = p?.lastSiteCheck?.url || last;
+  document.getElementById("site-check-result").innerHTML = "";
+  document.getElementById("site-check-modal").classList.add("open");
+};
+
+const runSiteCheck = async () => {
+  const id = document.getElementById("site-check-id").value;
+  let url = document.getElementById("site-check-url").value.trim();
+  if (!url) return UI.toast("Вкажіть адресу сторінки", "warning");
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  try { localStorage.setItem("siteCheckUrl", url); } catch { /* приватний режим */ }
+  const btn = document.getElementById("btn-run-site-check");
+  const box = document.getElementById("site-check-result");
+  UI.loading(btn, true);
+  box.innerHTML = '<p style="color:var(--text-2)">Запит іде…</p>';
+  try {
+    const r = await API.proxies.checkSite(id, url);
+    const row = (label, x) => {
+      const verdict = x.ok
+        ? '<span style="color:var(--success);font-weight:600">відкривається</span>'
+        : x.blocked
+          ? '<span style="color:var(--danger);font-weight:600">сайт блокує</span>'
+          : '<span style="color:var(--danger);font-weight:600">не відкривається</span>';
+      return `<tr>
+        <td><strong>${label}</strong></td>
+        <td>${verdict}</td>
+        <td>${x.status ?? "—"}</td>
+        <td>${x.responseTime} мс</td>
+        <td>${x.bytes ? (x.bytes / 1024).toFixed(0) + " КБ" : "—"}</td>
+        <td style="max-width:200px;word-break:break-word;font-size:12px">${escHtml(x.error || x.title || "—")}</td>
+      </tr>`;
+    };
+    box.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th></th><th>Результат</th><th>Код</th><th>Час</th><th>Розмір</th><th>Заголовок / помилка</th></tr></thead>
+      <tbody>${row("Через VPN/проксі", r.via)}${row("Напряму з сервера", r.direct)}</tbody>
+    </table></div>`;
+    loadProxies();
+  } catch (err) {
+    box.innerHTML = `<p style="color:var(--danger)">${escHtml(err.message)}</p>`;
+  } finally {
+    UI.loading(btn, false);
+  }
+};
+
+// ── Вибір проксі/VPN у задачі ────────────────────────────────────────────
+const toggleProxyChoice = () => {
+  document.getElementById("tf-proxy-choice-wrap").style.display =
+    document.getElementById("tf-proxy-enabled").checked ? "block" : "none";
+};
+
+/** Заповнює select: ротація (усі / лише проксі / лише VPN) + кожен VPN окремо. */
+const populateProxyChoice = async (proxyCfg = {}) => {
+  const sel = document.getElementById("tf-proxy-choice");
+  if (!sel) return;
+  const current = proxyCfg.rotate === false && proxyCfg.proxyId ? String(proxyCfg.proxyId) : `pool:${proxyCfg.pool || "all"}`;
+  const poolOpts =
+    '<option value="pool:all">Ротація: усі робочі проксі й VPN</option>' +
+    '<option value="pool:proxy">Ротація: лише проксі</option>' +
+    '<option value="pool:vpn">Ротація: лише VPN</option>';
+  // Одразу (до відповіді API) — щоб збереження задачі не загубило вибраний VPN
+  sel.innerHTML = poolOpts + (current.startsWith("pool:") ? "" : `<option value="${escHtml(current)}">…</option>`);
+  sel.value = current;
+  let vpns = [];
+  let fixed = null;
+  try {
+    vpns = (await API.proxies.list({ kind: "vpn", limit: 200 })).items || [];
+    if (current && !current.startsWith("pool:") && !vpns.some((v) => v._id === current)) {
+      fixed = (await API.proxies.list({ limit: 1000 })).items?.find((p) => p._id === current) || null;
+    }
+  } catch { /* список VPN недоступний — лишаються варіанти ротації */ }
+  const chosen = sel.value; // користувач міг уже змінити вибір, поки йшов запит
+  sel.innerHTML =
+    poolOpts +
+    (vpns.length
+      ? `<optgroup label="Конкретний VPN">${vpns
+          .map((v) => `<option value="${v._id}">${escHtml(v.name || v.vpnEndpoint)}${v.vpnEnabled === false ? " (вимкнено)" : v.status !== "active" ? " (не працює)" : ""}</option>`)
+          .join("")}</optgroup>`
+      : "") +
+    (fixed ? `<optgroup label="Конкретний проксі"><option value="${fixed._id}">${fixed.host}:${fixed.port}</option></optgroup>` : "");
+  sel.value = chosen || current;
+  if (!sel.value) sel.value = current.startsWith("pool:") ? current : "pool:all";
+};
+
+const readProxyChoice = () => {
+  const enabled = document.getElementById("tf-proxy-enabled").checked;
+  const v = document.getElementById("tf-proxy-choice")?.value || "pool:all";
+  return v.startsWith("pool:")
+    ? { enabled, rotate: true, pool: v.slice(5), proxyId: null }
+    : { enabled, rotate: false, pool: "all", proxyId: v };
 };
 
 const importProxies = async () => {
@@ -4535,6 +4719,13 @@ Object.assign(window, {
   deleteAllResults,
   checkProxy,
   deleteProxy,
+  openVpnModal,
+  closeVpnModal,
+  saveVpn,
+  toggleVpn,
+  openSiteCheck,
+  runSiteCheck,
+  toggleProxyChoice,
   showSubTaskHistory,
   runSubTaskNow,
   toggleSubTask,

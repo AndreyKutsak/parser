@@ -72,7 +72,7 @@ exports.preview = async (req, res, next) => {
     if (proxyCfg?.enabled) {
       proxy = proxyCfg.proxyId
         ? await proxyManager.getById(proxyCfg.proxyId)
-        : await proxyManager.getNextProxy();
+        : await proxyManager.getNextProxy(proxyCfg.pool || "all");
     }
 
     // Reuse cookies from a saved SiteAuth (same mechanism real task runs use), combined

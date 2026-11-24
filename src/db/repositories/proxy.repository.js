@@ -1,10 +1,12 @@
 const Proxy = require("../models/proxy.model");
 
 class ProxyRepository {
-  async findAll({ status, protocol, page = 1, limit = 50 } = {}) {
+  async findAll({ status, protocol, kind, page = 1, limit = 50 } = {}) {
     const filter = {};
     if (status) filter.status = status;
     if (protocol) filter.protocol = protocol;
+    if (kind === "vpn") filter.kind = "vpn";
+    else if (kind === "proxy") filter.kind = { $ne: "vpn" }; // старі записи без kind — це проксі
 
     const [items, total] = await Promise.all([
       Proxy.find(filter)
@@ -151,10 +153,31 @@ class ProxyRepository {
     return { reset: counters.modifiedCount, unbanned: unbanned.modifiedCount };
   }
 
-  /** Видалити всі неробочі проксі (inactive + banned). */
+  /** Видалити всі неробочі проксі (inactive + banned). VPN не чіпаємо — їх видаляють лише вручну. */
   async deleteDead() {
-    const { deletedCount } = await Proxy.deleteMany({ status: { $in: ["inactive", "banned"] } });
+    const { deletedCount } = await Proxy.deleteMany({ status: { $in: ["inactive", "banned"] }, kind: { $ne: "vpn" } });
     return { deleted: deletedCount };
+  }
+
+  // ── VPN (WireGuard) ─────────────────────────────────────────────────────
+
+  /** Усі VPN разом із конфігом (для vpn.daemon). */
+  async findVpnsWithConfig() {
+    return Proxy.find({ kind: "vpn" }).select("+wgConfig").lean();
+  }
+
+  /** Вільний локальний порт для SOCKS5 нового VPN (діапазон 41001–41999). */
+  async nextFreeVpnPort() {
+    const used = new Set((await Proxy.find({ kind: "vpn" }, { port: 1 }).lean()).map((p) => p.port));
+    for (let port = 41001; port <= 41999; port++) if (!used.has(port)) return port;
+    throw new Error("Немає вільних портів для VPN");
+  }
+
+  async setVpnState(id, { vpnStatus, vpnError = null, vpnStartedAt }) {
+    const $set = { vpnStatus };
+    if (vpnStartedAt) $set.vpnStartedAt = vpnStartedAt;
+    const update = vpnError ? { $set: { ...$set, vpnError: String(vpnError).slice(0, 300) } } : { $set, $unset: { vpnError: "" } };
+    return Proxy.updateOne({ _id: id }, update);
   }
 
   async getActiveCount() {

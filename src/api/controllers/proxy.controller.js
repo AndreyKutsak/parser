@@ -57,10 +57,11 @@ const logger = require("../../utils/logger");
  */
 exports.list = async (req, res, next) => {
   try {
-    const { status, protocol, page = 1, limit = 50 } = req.query;
+    const { status, protocol, kind, page = 1, limit = 50 } = req.query;
     const result = await proxyRepo.findAll({
       status,
       protocol,
+      kind,
       page: parseInt(page),
       limit: parseInt(limit),
     });
@@ -163,9 +164,41 @@ exports.get = async (req, res, next) => {
   }
 };
 
+/** POST /api/proxies/:id/check-site — перевірити проксі/VPN на конкретному сайті: { url } */
+exports.checkSite = async (req, res, next) => {
+  try {
+    const result = await proxyManager.checkSiteById(req.params.id, req.body?.url);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** POST /api/proxies/vpn — додати VPN (WireGuard): { name, config, tags?, note? } */
+exports.createVpn = async (req, res, next) => {
+  try {
+    const proxy = await proxyManager.addVpn(req.body);
+    res.status(201).json({ success: true, proxy });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** PUT /api/proxies/vpn/:id — змінити VPN: { name?, config?, vpnEnabled?, tags?, note? } */
+exports.updateVpn = async (req, res, next) => {
+  try {
+    const proxy = await proxyManager.updateVpn(req.params.id, req.body);
+    res.json({ success: true, proxy });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.update = async (req, res, next) => {
   try {
-    const proxy = await proxyRepo.update(req.params.id, req.body);
+    // Поля VPN змінюються лише через PUT /vpn/:id (з перевіркою конфігу)
+    const { wgConfig, kind, vpnStatus, vpnEnabled, vpnEndpoint, ...data } = req.body || {};
+    const proxy = await proxyRepo.update(req.params.id, data);
     if (!proxy)
       return res
         .status(404)

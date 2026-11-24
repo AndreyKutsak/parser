@@ -157,6 +157,61 @@ const validateOnce = async (proxy, ctx = {}) => {
   }
 };
 
+const SITE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const BLOCK_RE = /captcha|cf-chl|cloudflare|access denied|доступ заборонено|are you a robot|too many requests/i;
+
+/** Один GET на сайт (через проксі або напряму, якщо proxy=null). */
+const fetchSiteOnce = async (url, proxy) => {
+  const start = Date.now();
+  const agents = proxy ? buildAgents(proxy) : {};
+  let hardTimer;
+  try {
+    const response = await Promise.race([
+      axios.get(url, {
+        timeout: TIMEOUT,
+        ...agents,
+        proxy: false,
+        responseType: "text",
+        maxContentLength: 5 * 1024 * 1024,
+        maxRedirects: 5,
+        validateStatus: () => true,
+        headers: { "User-Agent": SITE_UA, Accept: "text/html,application/json;q=0.9,*/*;q=0.8", "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8" },
+      }),
+      new Promise((_, reject) => {
+        hardTimer = setTimeout(() => reject(new Error(`Timeout ${TIMEOUT}ms`)), TIMEOUT + 1000);
+      }),
+    ]);
+    const body = typeof response.data === "string" ? response.data : JSON.stringify(response.data ?? "");
+    const title = (body.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || "").replace(/\s+/g, " ").trim().slice(0, 150);
+    const blocked = response.status === 403 || response.status === 429 || BLOCK_RE.test(title) || (body.length < 20000 && BLOCK_RE.test(body));
+    return {
+      ok: response.status >= 200 && response.status < 400 && !blocked,
+      status: response.status,
+      responseTime: Date.now() - start,
+      bytes: Buffer.byteLength(body),
+      title,
+      blocked,
+      error: null,
+    };
+  } catch (err) {
+    const msg = err.message.split("\n")[0];
+    return { ok: false, status: null, responseTime: Date.now() - start, bytes: 0, title: "", blocked: false, error: err.code && !msg.startsWith(err.code) ? `${err.code}: ${msg}` : msg };
+  } finally {
+    clearTimeout(hardTimer);
+    agents.httpAgent?.destroy?.();
+    if (agents.httpsAgent !== agents.httpAgent) agents.httpsAgent?.destroy?.();
+  }
+};
+
+/**
+ * Перевірка проксі/VPN на конкретному сайті: запит через проксі і (для порівняння) напряму з сервера.
+ * @returns {{ url, via: object, direct: object }}
+ */
+const checkSite = async (proxy, url) => {
+  const [via, direct] = await Promise.all([fetchSiteOnce(url, proxy), fetchSiteOnce(url, null)]);
+  return { url, via, direct };
+};
+
 /**
  * Validate a list of proxies with a fixed-size worker pool (не чекаємо найповільніший у пачці).
  * @param {Array}    proxies
@@ -187,4 +242,4 @@ const validateBatch = async (proxies, onResult, ctx = {}) => {
   return results;
 };
 
-module.exports = { validateProxy, validateBatch, precheck };
+module.exports = { validateProxy, validateBatch, precheck, checkSite };

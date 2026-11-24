@@ -4,12 +4,16 @@ const { requireAuth } = require("../middlewares/auth.middleware");
 const {
   validateProxy,
   validateImport,
+  validateVpnCreate,
+  validateVpnUpdate,
 } = require("../validators/proxy.validator");
 
 router.use(requireAuth);
 
 router.get("/", proxy.list);
 router.post("/", validateProxy, proxy.create);
+router.post("/vpn", validateVpnCreate, proxy.createVpn);
+router.put("/vpn/:id", validateVpnUpdate, proxy.updateVpn);
 router.post("/import", validateImport, proxy.importBulk);
 router.post("/bulk-delete", proxy.removeBulk);
 router.post("/check-all", proxy.checkAll);
@@ -21,5 +25,6 @@ router.get("/:id", proxy.get);
 router.put("/:id", proxy.update);
 router.delete("/:id", proxy.remove);
 router.post("/:id/check", proxy.check);
+router.post("/:id/check-site", proxy.checkSite);
 
 module.exports = router;

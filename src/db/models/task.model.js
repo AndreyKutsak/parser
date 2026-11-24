@@ -195,6 +195,8 @@ const taskSchema = new mongoose.Schema(
     proxy: {
       enabled: { type: Boolean, default: false },
       rotate: { type: Boolean, default: true },
+      // Пул ротації: 'all' — проксі й VPN, 'proxy' — лише проксі, 'vpn' — лише VPN
+      pool: { type: String, enum: ["all", "proxy", "vpn"], default: "all" },
       proxyId: { type: mongoose.Schema.Types.ObjectId, ref: "Proxy" },
     },
 

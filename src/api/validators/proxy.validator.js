@@ -31,7 +31,24 @@ const validate = (schema) => (req, res, next) => {
   next();
 };
 
+const vpnCreateSchema = Joi.object({
+  name:   Joi.string().max(100).allow('', null),
+  config: Joi.string().max(20000).required().messages({ 'any.required': 'Вставте WireGuard-конфіг (.conf)' }),
+  tags:   Joi.array().items(Joi.string()).default([]),
+  note:   Joi.string().max(500).allow('', null),
+});
+
+const vpnUpdateSchema = Joi.object({
+  name:       Joi.string().max(100).allow('', null),
+  config:     Joi.string().max(20000).allow('', null), // порожній — лишається старий конфіг
+  vpnEnabled: Joi.boolean(),
+  tags:       Joi.array().items(Joi.string()),
+  note:       Joi.string().max(500).allow('', null),
+});
+
 module.exports = {
   validateProxy: validate(proxySchema),
   validateImport: validate(importSchema),
+  validateVpnCreate: validate(vpnCreateSchema),
+  validateVpnUpdate: validate(vpnUpdateSchema),
 };

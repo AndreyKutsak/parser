@@ -354,7 +354,7 @@ class ParserService {
       let proxy = null;
       if (task.proxy?.enabled) {
         proxy = task.proxy.rotate
-          ? await proxyManager.getNextProxy()
+          ? await proxyManager.getNextProxy(task.proxy.pool || "all")
           : await proxyManager.getById(task.proxy.proxyId);
       }
 
@@ -798,7 +798,7 @@ class ParserService {
               // (мережа/проксі), а не парсинг/селектори на вже отриманій сторінці
               if (reqProxy && task.proxy?.rotate && err.isFetchError) {
                 await proxyManager.recordFailure(reqProxy._id);
-                reqProxy = await proxyManager.getNextProxy();
+                reqProxy = await proxyManager.getNextProxy(task.proxy.pool || "all");
                 fetchOptions.proxy = reqProxy;
               }
 

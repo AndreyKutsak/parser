@@ -1,6 +1,20 @@
 module.exports = {
   apps: [
     {
+      // VPN-тунелі (WireGuard через wireproxy) для проксі типу «VPN». Окремо від app/worker,
+      // щоб тунелі не обривались при їх перезапуску.
+      name: 'vpn',
+      script: 'src/vpn/vpn.daemon.js',
+      node_args: '--max-old-space-size=128',
+      max_memory_restart: '200M',
+      autorestart: true,
+      exp_backoff_restart_delay: 1000,
+      min_uptime: '10s',
+      max_restarts: 20,
+      kill_timeout: 5000,
+      env: { NODE_ENV: 'production' },
+    },
+    {
       name: 'app',
       script: 'src/app.js',
       // Hit real V8 heap OOM in prod at 256MB (2026-07-30) — host cgroup limit is
