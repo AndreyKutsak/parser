@@ -76,6 +76,39 @@ const trackFieldChanges = (task, newData, oldData) => {
 const subst = (tpl, item) =>
   tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) => String(item[k.trim()] ?? ''));
 
+// Те саме, але значення кодуються для підстановки в URL (пробіли, &, #, * у назвах товарів)
+const substEncoded = (tpl, item) =>
+  tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) =>
+    encodeURIComponent(String(item[k.trim()] ?? '').replace(/\s+/g, ' ').trim()));
+
+const normalizeMatch = (v) => (v == null ? '' : String(v).replace(/\s+/g, ' ').trim());
+
+/**
+ * Розбирає jsonFields follow-поля у режимі «вибір запису за збігом».
+ * Шлях має вигляд `[поле_JSON={{поле запису}}].шлях.до.значення`, наприклад
+ *   `[product_link={{Посилання на товар}}].quantity`
+ * → шукаємо в JSON-масиві запис, у якого product_link дорівнює rec["Посилання на товар"],
+ *   і беремо з нього quantity. Порожній `key` — значення пишеться в саме поле (fieldName),
+ *   непорожній — у колонку `${fieldName}_${key}`.
+ * Повертає масив правил або null, якщо хоч один шлях не такого формату.
+ */
+const MATCH_PATH_RE = /^\[([^=\]]+)=(.+?)\]\.?(.+)$/;
+const parseMatchFields = (jsonFields) => {
+  if (!Array.isArray(jsonFields) || !jsonFields.length) return null;
+  const rules = [];
+  for (const jf of jsonFields) {
+    const m = MATCH_PATH_RE.exec(String(jf?.path || '').trim());
+    if (!m) return null;
+    rules.push({
+      matchPath: m[1].trim(),
+      valueTpl: m[2].trim(),
+      valuePath: m[3].trim(),
+      target: (fieldName) => (jf.key ? `${fieldName}_${jf.key}` : fieldName),
+    });
+  }
+  return rules;
+};
+
 // Оцінює одне правило над значенням поля
 const _testOperator = (strVal, op, ruleVal) => {
   switch (op) {
@@ -1365,6 +1398,9 @@ class ParserService {
         // Рекурсія в sub-поля (якщо вони теж мають follow)
         await this._followFields(rec, subFieldsMap, rec[fieldName] ? resolveUrl(rec[fieldName], baseUrl) : baseUrl, ctx, depth + 1);
 
+      } else if (parseMatchFields(cfg.jsonFields)) {
+        // JSON-пошук з вибором запису за збігом поля (напр. підказки пошуку магазину)
+        await this._followMatchLookup(rec, fieldName, cfg, baseUrl, ctx);
       } else {
         // Лише urlTemplate без subSelectors — підставляємо поточні значення rec
         const rawUrl = subst(cfg.urlTemplate, rec);
@@ -1389,6 +1425,50 @@ class ParserService {
           ctx.emit(ctx.taskId, { type: 'follow:error', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx, error: e.message });
           logger.warn('[FOLLOW FIELD] помилка', { taskId: ctx.taskId, fieldName, url: targetUrl, error: e.message });
         }
+      }
+    }
+  }
+
+  /**
+   * Follow-поле у режимі «вибір запису за збігом»: запит за urlTemplate повертає JSON-масив
+   * (напр. підказки пошуку), з нього береться запис, у якого поле збігається зі значенням з rec,
+   * і значення з нього записуються в rec (див. parseMatchFields).
+   *
+   * urlTemplate може містити кілька URL через « || » — пробуються по черзі, доки не знайдеться збіг.
+   * Значення {{поле}} у URL кодуються (encodeURIComponent).
+   * Якщо збігу немає — rec не змінюється (в записі лишається значення зі списку).
+   */
+  async _followMatchLookup(rec, fieldName, cfg, baseUrl, ctx) {
+    const matchFields = parseMatchFields(cfg.jsonFields);
+    const templates = String(cfg.urlTemplate || '').split('||').map(s => s.trim()).filter(Boolean);
+    const apiEngine = ctx.staticEngine ?? ctx.engine;
+
+    for (const tpl of templates) {
+      const vars = [...tpl.matchAll(/\{\{([^}]+)\}\}/g)].map(m => m[1].trim());
+      if (vars.some(v => rec[v] == null || rec[v] === '')) continue;
+      const targetUrl = resolveUrl(substEncoded(tpl, rec), baseUrl);
+      try {
+        ctx.emit(ctx.taskId, { type: 'follow:start', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx });
+        const { rawJsonItems } = await apiEngine.fetchPage(targetUrl, { ...ctx.fetchOptions, jsonPath: '.' });
+        const items = Array.isArray(rawJsonItems) ? rawJsonItems : [];
+
+        const found = {};
+        let matched = true;
+        for (const mf of matchFields) {
+          const expected = normalizeMatch(subst(mf.valueTpl, rec));
+          const item = expected && items.find(it => normalizeMatch(resolveJsonPath(it, mf.matchPath)) === expected);
+          if (!item) { matched = false; break; }
+          found[mf.target(fieldName)] = resolveJsonPath(item, mf.valuePath);
+        }
+        if (matched) {
+          Object.assign(rec, found);
+          ctx.emit(ctx.taskId, { type: 'follow:done', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx, preview: dataPreview(found) });
+          return;
+        }
+        ctx.emit(ctx.taskId, { type: 'follow:done', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx, preview: { match: 'не знайдено', items: items.length } });
+      } catch (e) {
+        ctx.emit(ctx.taskId, { type: 'follow:error', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx, error: e.message });
+        logger.warn('[FOLLOW MATCH] помилка', { taskId: ctx.taskId, fieldName, url: targetUrl, error: e.message });
       }
     }
   }
