@@ -70,3 +70,54 @@ describe('_followFields: вибір запису за збігом', () => {
     expect(calls[0].url).toContain('q=A%26B%20%231%20M8*1.25');
   });
 });
+
+describe('_followFields: кеш, частини значень і дата перевірки', () => {
+  const items = [
+    mkItem(1, '01.00188222', 120, 128),
+    mkItem(2, '01.00188223', 130, 5),
+    mkItem(3, '01.00188224', 140, 0),
+  ];
+  const cfgPart = {
+    type: 'лінк на іншу сторінку',
+    follow: true,
+    urlTemplate: 'https://shop.test/poshuk?q={{Артикул|after:.|chars:5}} || https://shop.test/poshuk?q={{Артикул}}',
+    jsonFields: [
+      { path: '[product_link={{Посилання на товар}}].quantity', key: '' },
+      { path: '[product_link={{Посилання на товар}}].@now', key: 'оновлено' },
+    ],
+  };
+  const ctxWith = (calls, extra) => ({
+    ...makeCtx(calls),
+    engine: { fetchPage: async (url) => { calls.push({ url }); return { rawJsonItems: items }; } },
+    ...extra,
+  });
+  const rec = (id, art) => ({ 'Артикул': art, 'Кількість': null, 'Посилання на товар': `https://zapchasty.com.ua/product/${id}-slug-${id}.html` });
+
+  test('частина артикула підставляється у запит', async () => {
+    const calls = [];
+    await parserService._followFields(rec(1, '01.00188222'), new Map([['Кількість', cfgPart]]), 'https://shop.test/', ctxWith(calls, {}));
+    expect(calls[0].url).toContain('q=00188');
+  });
+
+  test('сусіди з відповіді беруться з кешу без нових запитів, дата перевірки ставиться', async () => {
+    const calls = [];
+    const matchCache = new Map();
+    const matchStats = {};
+    const ctx = ctxWith(calls, { matchCache, matchStats });
+    const recs = [rec(1, '01.00188222'), rec(2, '01.00188223'), rec(3, '01.00188224')];
+    for (const r of recs) await parserService._followFields(r, new Map([['Кількість', cfgPart]]), 'https://shop.test/', ctx);
+    expect(recs.map(r => r['Кількість'])).toEqual([128, 5, 0]);
+    expect(calls).toHaveLength(1);
+    expect(matchStats).toEqual({ requests: 1, cacheHits: 2 });
+    expect(recs[2]['Кількість_оновлено']).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  test('товару немає ні в кеші, ні у відповідях — лічильник notFound', async () => {
+    const calls = [];
+    const matchStats = {};
+    const r = rec(99, '01.99999999');
+    await parserService._followFields(r, new Map([['Кількість', cfgPart]]), 'https://shop.test/', ctxWith(calls, { matchCache: new Map(), matchStats }));
+    expect(r['Кількість']).toBeNull();
+    expect(matchStats).toEqual({ requests: 2, notFound: 1 });
+  });
+});

@@ -1423,13 +1423,147 @@ const addJsonFieldAtPath = (pathStr) => {
   renderFieldRows();
 };
 
-// Заготовка для режиму «вибір запису за збігом»: шукає в JSON-масиві запис, у якого
-// product_link дорівнює полю «Посилання на товар», і записує quantity в це ж поле.
+// ── Режим «вибір запису за збігом» ────────────────────────────────────────────
+const MATCH_RULE_RE = /^\[([^=\]]+)=(.+?)\]\.?(.+)$/;
+const _isMatchRule = (jf) => MATCH_RULE_RE.test(String(jf?.path || '').trim());
+const _hasMatchRules = (f) => (f.jsonFields || []).some(_isMatchRule);
+
+// Заготовка: шукає в JSON-масиві запис, у якого product_link дорівнює полю «Посилання на товар»,
+// і записує quantity в це ж поле.
 const addMatchJsonFieldAtPath = (pathStr) => {
   const f = _getFieldAtPath(_pathFromStr(pathStr));
   if (!f.jsonFields) f.jsonFields = [];
   f.jsonFields.push({ path: '[product_link={{Посилання на товар}}].quantity', key: '', format: 'join' });
   renderFieldRows();
+};
+
+// Додає правило «дата й час перевірки» з тією ж умовою збігу, що й перше правило
+const addMatchNowFieldAtPath = (pathStr) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  const first = (f.jsonFields || []).find(_isMatchRule);
+  const cond = first ? String(first.path).trim().match(MATCH_RULE_RE) : null;
+  const prefix = cond ? `[${cond[1]}=${cond[2]}]` : '[product_link={{Посилання на товар}}]';
+  if (!f.jsonFields) f.jsonFields = [];
+  f.jsonFields.push({ path: `${prefix}.@now`, key: 'оновлено', format: 'join' });
+  renderFieldRows();
+};
+
+/**
+ * Конструктор пошуку: urlTemplate вигляду
+ *   "BASE с {{Поле|after:.|chars:6}} || BASE с {{Поле2|words:3}}"
+ * ↔ { base: "…q={q}…", queries: [{ field, after, cut, n }] }.
+ * Повертає null, якщо шаблон задано вручну в іншому вигляді.
+ */
+const parseSearchTpl = (tpl) => {
+  const parts = String(tpl || '').split('||').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return { base: '', queries: [] };
+  let base = null;
+  const queries = [];
+  for (const p of parts) {
+    const vars = [...p.matchAll(/\{\{([^}]+)\}\}/g)];
+    if (vars.length !== 1) return null;
+    const b = p.replace(vars[0][0], '{q}');
+    if (base !== null && b !== base) return null;
+    base = b;
+    const [field, ...filters] = vars[0][1].split('|').map(s => s.trim());
+    const q = { field, after: '', cut: '', n: '' };
+    for (const flt of filters) {
+      const i = flt.indexOf(':');
+      const name = i < 0 ? flt : flt.slice(0, i);
+      const arg = i < 0 ? '' : flt.slice(i + 1);
+      if (name === 'after') q.after = arg;
+      else if (name === 'chars' || name === 'words') { q.cut = name; q.n = arg; }
+    }
+    queries.push(q);
+  }
+  return { base, queries };
+};
+
+const buildSearchTpl = ({ base, queries }) => {
+  if (!base || !base.includes('{q}')) return '';
+  return queries.filter(q => q.field).map(q => {
+    const filters = [];
+    if (q.after) filters.push(`after:${q.after}`);
+    if (q.cut && parseInt(q.n, 10) > 0) filters.push(`${q.cut}:${parseInt(q.n, 10)}`);
+    return base.replace('{q}', `{{${[q.field, ...filters].join('|')}}}`);
+  }).join(' || ');
+};
+
+const _editSearchTpl = (pathStr, mutate) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  const st = parseSearchTpl(f.urlTemplate) || { base: '', queries: [] };
+  mutate(st);
+  const built = buildSearchTpl(st);
+  // Без коректної адреси ({q}) не затираємо вже заданий шаблон
+  if (built || !st.queries.length) f.urlTemplate = built;
+  f._searchBase = st.base; // база зберігається між перемальовуваннями, поки запитів ще немає
+  renderFieldRows();
+};
+const updateSearchBase = (pathStr, val) => _editSearchTpl(pathStr, (st) => { st.base = val.trim(); });
+const addSearchQuery = (pathStr) => _editSearchTpl(pathStr, (st) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  if (!st.base) st.base = f._searchBase || '';
+  const firstName = (state.fields.find(x => x.name && x !== f) || {}).name || '';
+  st.queries.push({ field: firstName, after: '', cut: '', n: '' });
+});
+const updateSearchQuery = (pathStr, idx, prop, val) => _editSearchTpl(pathStr, (st) => {
+  if (st.queries[idx]) st.queries[idx][prop] = val;
+});
+const removeSearchQuery = (pathStr, idx) => _editSearchTpl(pathStr, (st) => { st.queries.splice(idx, 1); });
+const moveSearchQuery = (pathStr, idx, dir) => _editSearchTpl(pathStr, (st) => {
+  const j = idx + dir;
+  if (j < 0 || j >= st.queries.length) return;
+  [st.queries[idx], st.queries[j]] = [st.queries[j], st.queries[idx]];
+});
+
+const _renderSearchBuilder = (f, pathStr) => {
+  const st = parseSearchTpl(f.urlTemplate);
+  if (!st) {
+    return `<div style="margin-bottom:10px;padding:8px 10px;border:1px dashed var(--border,#cbd5e1);border-radius:6px;font-size:11px;color:var(--text-2)">
+      Пошук задано вручну в полі «URL шаблон». Щоб скористатися конструктором, залиште в кожному URL одну змінну <code>{{поле}}</code> і однакову решту адреси.
+    </div>`;
+  }
+  const base = st.base || f._searchBase || '';
+  const fieldNames = state.fields.map(x => x.name).filter(n => n && n !== f.name);
+  const opt = (sel, v, label) => `<option value="${escHtml(v)}" ${sel === v ? 'selected' : ''}>${escHtml(label)}</option>`;
+  const rows = st.queries.map((q, i) => `
+    <div style="display:grid;grid-template-columns:22px 1fr 110px 120px 60px 52px 24px;gap:4px;align-items:center;margin-bottom:4px">
+      <span style="font-size:11px;color:var(--text-2);text-align:center">${i + 1}</span>
+      <select class="form-control" style="font-size:11px" onchange="updateSearchQuery('${pathStr}',${i},'field',this.value)">
+        ${fieldNames.map(n => opt(q.field, n, n)).join('')}
+        ${q.field && !fieldNames.includes(q.field) ? opt(q.field, q.field, q.field) : ''}
+      </select>
+      <input class="form-control" style="font-size:11px;font-family:monospace" placeholder="після символу"
+             title="Взяти частину після першого входження цього символу. Напр. «.» для 01.00188222 → 00188222"
+             value="${escHtml(q.after)}" onchange="updateSearchQuery('${pathStr}',${i},'after',this.value)">
+      <select class="form-control" style="font-size:11px" onchange="updateSearchQuery('${pathStr}',${i},'cut',this.value)">
+        ${opt(q.cut, '', 'усе значення')}${opt(q.cut, 'chars', 'перші N символів')}${opt(q.cut, 'words', 'перші N слів')}
+      </select>
+      <input class="form-control" style="font-size:11px" type="number" min="1" placeholder="N" ${q.cut ? '' : 'disabled'}
+             value="${escHtml(q.n)}" onchange="updateSearchQuery('${pathStr}',${i},'n',this.value)">
+      <span style="display:flex;gap:2px">
+        <button class="btn btn-xs btn-ghost" title="Вище" onclick="moveSearchQuery('${pathStr}',${i},-1)">↑</button>
+        <button class="btn btn-xs btn-ghost" title="Нижче" onclick="moveSearchQuery('${pathStr}',${i},1)">↓</button>
+      </span>
+      <button class="btn btn-xs btn-danger" title="Видалити" onclick="removeSearchQuery('${pathStr}',${i})">✕</button>
+    </div>`).join('');
+  return `<div style="margin-bottom:10px;padding:8px 10px;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:var(--bg,#fff)">
+    <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">Конструктор пошуку</div>
+    <label class="form-label" style="font-size:11px;margin-bottom:3px;display:block">Адреса пошуку, <code>{q}</code> — місце для запиту</label>
+    <input class="form-control" style="font-size:12px;font-family:monospace;margin-bottom:8px"
+           placeholder="https://site.ua/poshuk?limit=10&ajaxSearch=1&q={q}"
+           value="${escHtml(base)}" onchange="updateSearchBase('${pathStr}',this.value)">
+    ${base && !base.includes('{q}') ? `<p style="font-size:11px;color:var(--danger);margin:-4px 0 8px">Додайте в адресу <code>{q}</code> — туди підставиться запит.</p>` : ''}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <span style="font-size:11px;color:var(--text-2)">Запити — пробуються по черзі, доки товар не знайдеться</span>
+      <button class="btn btn-xs btn-ghost" onclick="addSearchQuery('${pathStr}')">+ запит</button>
+    </div>
+    ${rows || `<p style="font-size:11px;color:var(--text-2);margin:0;font-style:italic">Додайте запит: яке поле товару (або його частину) підставляти в пошук.</p>`}
+    <p class="form-hint" style="margin:6px 0 0;font-size:11px">
+      Кожна відповідь пошуку запам'ятовується до кінця запуску: товари, що вже прийшли в попередніх відповідях, беруться звідти без нового запиту.
+      Повний артикул зазвичай дає найменше запитів — короткі частини повертають «чужі» товари.
+    </p>
+  </div>`;
 };
 
 const updateJsonFieldAtPath = (pathStr, idx, key, val) => {
@@ -1611,8 +1745,14 @@ const _renderFieldItem = (f, pathStr, depth = 0) => {
         <p class="form-hint" style="margin:3px 0 0;font-size:11px">
           Кілька URL — через <code>||</code>: пробуються по черзі, доки не знайдеться збіг. Значення <code>{{поле}}</code> у режимі збігу кодуються автоматично.
         </p>
+        ${!f.urlTemplate && !_hasMatchRules(f) ? `
+        <button class="btn btn-xs btn-ghost" style="margin-top:4px" onclick="addMatchJsonFieldAtPath('${pathStr}')"
+                title="Для сайтів, де значення є в JSON-пошуку (підказках), а не у списку товарів">
+          Налаштувати оновлення через пошук сайту
+        </button>` : ''}
       </div>
-      ${f.urlTemplate ? `
+      ${_hasMatchRules(f) ? _renderSearchBuilder(f, pathStr) : ''}
+      ${f.urlTemplate || _hasMatchRules(f) ? `
       <div style="margin-bottom:10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <span style="font-size:11px;font-weight:600;color:var(--text-2)">
@@ -1622,6 +1762,8 @@ const _renderFieldItem = (f, pathStr, depth = 0) => {
           </span>
           <span>
             <button class="btn btn-xs btn-ghost" title="Вибрати з JSON-масиву запис, у якого поле збігається з полем нашого запису (напр. оновлення кількості через пошук)" onclick="addMatchJsonFieldAtPath('${pathStr}')">+ вибір за збігом</button>
+            ${_hasMatchRules(f) && !(f.jsonFields || []).some(jf => /\.@now$/.test(String(jf.path || '').trim())) ? `
+            <button class="btn btn-xs btn-ghost" title="Колонка з датою й часом, коли товар знайдено в пошуку (за Києвом)" onclick="addMatchNowFieldAtPath('${pathStr}')">+ дата перевірки</button>` : ''}
             <button class="btn btn-xs btn-ghost" onclick="addJsonFieldAtPath('${pathStr}')">+ поле</button>
           </span>
         </div>
@@ -1962,6 +2104,9 @@ const showRunLog = async (taskId) => {
             </span>
             <span style="font-size:12px;color:var(--text-2)">
               ${r.totalPages} стор. · ${r.totalRecords} записів · ${dur}
+              ${r.matchStats ? `<br><span title="Пошук за збігом: скільки запитів до джерела зроблено, скільки товарів взято з уже отриманих відповідей (кеш) і скільки не знайдено">
+                пошук: ${r.matchStats.requests || 0} запит. · з кешу ${r.matchStats.cacheHits || 0} · не знайдено ${r.matchStats.notFound || 0}
+              </span>` : ""}
             </span>
           </div>
           ${

@@ -76,10 +76,36 @@ const trackFieldChanges = (task, newData, oldData) => {
 const subst = (tpl, item) =>
   tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) => String(item[k.trim()] ?? ''));
 
-// Те саме, але значення кодуються для підстановки в URL (пробіли, &, #, * у назвах товарів)
+/**
+ * Фільтри частини значення у шаблоні: {{Поле|фільтр:арг|фільтр:арг}}
+ *   after:X  — частина після першого входження X  ("01.00188222" |after:. → "00188222")
+ *   chars:N  — перші N символів                  ("00188222"    |chars:5 → "00188")
+ *   words:N  — перші N слів                      ("Підшипник 6203 SKF" |words:2 → "Підшипник 6203")
+ */
+const applyTplFilters = (value, filters) => {
+  let v = String(value ?? '').replace(/\s+/g, ' ').trim();
+  for (const f of filters) {
+    const i = f.indexOf(':');
+    const name = (i === -1 ? f : f.slice(0, i)).trim();
+    const arg = i === -1 ? '' : f.slice(i + 1);
+    if (name === 'after') { const p = v.indexOf(arg); if (arg && p !== -1) v = v.slice(p + arg.length); }
+    else if (name === 'chars') { const n = parseInt(arg, 10); if (n > 0) v = v.slice(0, n); }
+    else if (name === 'words') { const n = parseInt(arg, 10); if (n > 0) v = v.split(' ').slice(0, n).join(' '); }
+  }
+  return v.trim();
+};
+const tplVar = (expr, item) => {
+  const [name, ...filters] = expr.split('|');
+  return applyTplFilters(item[name.trim()], filters);
+};
+const tplVarNames = (tpl) => [...tpl.matchAll(/\{\{([^}]+)\}\}/g)].map(m => m[1].split('|')[0].trim());
+
+// Підстановка для URL: значення (з фільтрами) кодуються — пробіли, &, #, * у назвах товарів
 const substEncoded = (tpl, item) =>
-  tpl.replace(/\{\{([^}]+)\}\}/g, (_, k) =>
-    encodeURIComponent(String(item[k.trim()] ?? '').replace(/\s+/g, ' ').trim()));
+  tpl.replace(/\{\{([^}]+)\}\}/g, (_, expr) => encodeURIComponent(tplVar(expr, item)));
+
+// Час перевірки для valuePath "@now" (за Києвом, "2026-11-24 12:10:04")
+const nowKyiv = () => new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Kyiv' });
 
 const normalizeMatch = (v) => (v == null ? '' : String(v).replace(/\s+/g, ' ').trim());
 
@@ -263,6 +289,9 @@ class ParserService {
     let pagesVisited = 0;
     let lastActivityAt = Date.now();
     const pageLog = []; // лог кожної сторінки
+    // Кеш і лічильники follow-полів у режимі «вибір за збігом» (спільні для всіх сторінок прогону)
+    const matchCache = new Map();
+    const matchStats = { requests: 0, cacheHits: 0, notFound: 0 };
 
     logger.info("Запуск парсингу", {
       taskId: task._id,
@@ -618,6 +647,8 @@ class ParserService {
                         fetchOptions,
                         taskId: task._id,
                         followDelay: task.options?.followDelay ?? 0,
+                        matchCache,
+                        matchStats,
                         runId,
                         idx,
                         emit,
@@ -1128,6 +1159,7 @@ class ParserService {
         lastError: null,
       };
 
+      const hasMatchStats = matchStats.requests + matchStats.cacheHits + matchStats.notFound > 0;
       await Promise.all([
         taskRepo.updateStatus(task._id, "idle", { stats }),
         Run.findOneAndUpdate(
@@ -1139,6 +1171,7 @@ class ParserService {
             totalPages: pagesVisited,
             duration,
             finishedAt: now,
+            ...(hasMatchStats ? { matchStats } : {}),
           },
         ),
       ]);
@@ -1148,6 +1181,7 @@ class ParserService {
         runId,
         totalRecords,
         duration: formatDuration(duration),
+        ...(hasMatchStats ? { matchStats } : {}),
       });
       emit(task._id, {
         type: "run:complete",
@@ -1449,25 +1483,47 @@ class ParserService {
     const matchFields = parseMatchFields(cfg.jsonFields);
     const templates = String(cfg.urlTemplate || '').split('||').map(s => s.trim()).filter(Boolean);
     const apiEngine = ctx.staticEngine ?? ctx.engine;
+    // Кеш на час прогону: кожна відповідь (до 10 товарів) кладеться сюди повністю,
+    // тож товари, які вже прийшли «сусідами» в попередніх відповідях, не потребують запиту.
+    const cache = ctx.matchCache ?? new Map();
+    const stats = ctx.matchStats ?? {};
+    const cacheKey = (path, val) => `${fieldName}\u0000${path}\u0000${val}`;
+
+    const resolveFromCache = () => {
+      const found = {};
+      for (const mf of matchFields) {
+        const expected = normalizeMatch(subst(mf.valueTpl, rec));
+        const item = expected && cache.get(cacheKey(mf.matchPath, expected));
+        if (!item) return null;
+        found[mf.target(fieldName)] = mf.valuePath === '@now' ? nowKyiv() : resolveJsonPath(item, mf.valuePath);
+      }
+      return found;
+    };
+
+    const cached = resolveFromCache();
+    if (cached) {
+      stats.cacheHits = (stats.cacheHits || 0) + 1;
+      Object.assign(rec, cached);
+      return;
+    }
 
     for (const tpl of templates) {
-      const vars = [...tpl.matchAll(/\{\{([^}]+)\}\}/g)].map(m => m[1].trim());
-      if (vars.some(v => rec[v] == null || rec[v] === '')) continue;
+      if (tplVarNames(tpl).some(v => rec[v] == null || rec[v] === '')) continue;
       const targetUrl = resolveUrl(substEncoded(tpl, rec), baseUrl);
       try {
         ctx.emit(ctx.taskId, { type: 'follow:start', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx });
+        stats.requests = (stats.requests || 0) + 1;
         const { rawJsonItems } = await apiEngine.fetchPage(targetUrl, { ...ctx.fetchOptions, jsonPath: '.' });
         const items = Array.isArray(rawJsonItems) ? rawJsonItems : [];
-
-        const found = {};
-        let matched = true;
-        for (const mf of matchFields) {
-          const expected = normalizeMatch(subst(mf.valueTpl, rec));
-          const item = expected && items.find(it => normalizeMatch(resolveJsonPath(it, mf.matchPath)) === expected);
-          if (!item) { matched = false; break; }
-          found[mf.target(fieldName)] = resolveJsonPath(item, mf.valuePath);
+        for (const it of items) {
+          for (const mf of matchFields) {
+            const v = normalizeMatch(resolveJsonPath(it, mf.matchPath));
+            if (v) cache.set(cacheKey(mf.matchPath, v), it);
+          }
         }
-        if (matched) {
+
+        const found = resolveFromCache();
+        if (found) {
           Object.assign(rec, found);
           ctx.emit(ctx.taskId, { type: 'follow:done', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx, preview: dataPreview(found) });
           return;
@@ -1478,6 +1534,7 @@ class ParserService {
         logger.warn('[FOLLOW MATCH] помилка', { taskId: ctx.taskId, fieldName, url: targetUrl, error: e.message });
       }
     }
+    stats.notFound = (stats.notFound || 0) + 1;
   }
 
   /**

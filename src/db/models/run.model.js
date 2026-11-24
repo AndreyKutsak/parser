@@ -21,6 +21,8 @@ const runSchema = new mongoose.Schema({
   startedAt:    { type: Date, default: Date.now },
   finishedAt:   { type: Date },
   error:        { type: String },
+  // Статистика follow-полів у режимі «вибір за збігом»: { requests, cacheHits, notFound }
+  matchStats:   { type: mongoose.Schema.Types.Mixed, default: null },
 }, { timestamps: false });
 
 runSchema.index({ taskId: 1, startedAt: -1 });
