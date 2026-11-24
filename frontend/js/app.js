@@ -1423,6 +1423,15 @@ const addJsonFieldAtPath = (pathStr) => {
   renderFieldRows();
 };
 
+// Заготовка для режиму «вибір запису за збігом»: шукає в JSON-масиві запис, у якого
+// product_link дорівнює полю «Посилання на товар», і записує quantity в це ж поле.
+const addMatchJsonFieldAtPath = (pathStr) => {
+  const f = _getFieldAtPath(_pathFromStr(pathStr));
+  if (!f.jsonFields) f.jsonFields = [];
+  f.jsonFields.push({ path: '[product_link={{Посилання на товар}}].quantity', key: '', format: 'join' });
+  renderFieldRows();
+};
+
 const updateJsonFieldAtPath = (pathStr, idx, key, val) => {
   const f = _getFieldAtPath(_pathFromStr(pathStr));
   if (!f.jsonFields?.[idx]) return;
@@ -1599,6 +1608,9 @@ const _renderFieldItem = (f, pathStr, depth = 0) => {
         <input class="form-control" style="font-size:12px" placeholder="https://api.site.com/{{id}}/details"
                value="${escHtml(f.urlTemplate || '')}"
                oninput="updateFieldAtPath('${pathStr}','urlTemplate',this.value)">
+        <p class="form-hint" style="margin:3px 0 0;font-size:11px">
+          Кілька URL — через <code>||</code>: пробуються по черзі, доки не знайдеться збіг. Значення <code>{{поле}}</code> у режимі збігу кодуються автоматично.
+        </p>
       </div>
       ${f.urlTemplate ? `
       <div style="margin-bottom:10px;">
@@ -1608,27 +1620,31 @@ const _renderFieldItem = (f, pathStr, depth = 0) => {
             <span title="JSON шлях: data.items — повний масив, data.items[].name — конкретне поле з кожного елементу.&#10;Шаблон: {brand_name} ({code}) — підставляє поля об'єкта.&#10;Роздільник: символ між елементами масиву."
                   style="cursor:help;color:var(--primary);margin-left:4px;font-size:12px">ⓘ</span>
           </span>
-          <button class="btn btn-xs btn-ghost" onclick="addJsonFieldAtPath('${pathStr}')">+ поле</button>
+          <span>
+            <button class="btn btn-xs btn-ghost" title="Вибрати з JSON-масиву запис, у якого поле збігається з полем нашого запису (напр. оновлення кількості через пошук)" onclick="addMatchJsonFieldAtPath('${pathStr}')">+ вибір за збігом</button>
+            <button class="btn btn-xs btn-ghost" onclick="addJsonFieldAtPath('${pathStr}')">+ поле</button>
+          </span>
         </div>
         ${(f.jsonFields||[]).length === 0
-          ? `<p style="font-size:11px;color:var(--text-2);margin:0;font-style:italic">Натисніть "+ поле" щоб налаштувати витяг даних з API відповіді</p>`
+          ? `<p style="font-size:11px;color:var(--text-2);margin:0;font-style:italic">Натисніть "+ поле" щоб налаштувати витяг даних з API відповіді, або "+ вибір за збігом", якщо відповідь — список товарів, а потрібен один (за посиланням чи артикулом)</p>`
           : (f.jsonFields||[]).map((jf,ji) => {
+            const isMatch = /^\[[^=\]]+=.+\]/.test(String(jf.path || '').trim());
             const fmt = jf.format || 'join';
             const isTemplate = fmt === 'template';
             const hasSep = fmt !== 'first' && fmt !== 'count' && fmt !== 'json';
             return `<div style="margin-bottom:4px;">
               <div style="display:grid;grid-template-columns:1fr 80px 120px 80px 24px;gap:4px;align-items:center;">
                 <input class="form-control" style="font-size:11px;font-family:monospace"
-                       title="JSON шлях&#10;• data.models → весь масив&#10;• data.models[].name → витягнути поле name з кожного об'єкту"
+                       title="JSON шлях&#10;• data.models → весь масив&#10;• data.models[].name → витягнути поле name з кожного об'єкту&#10;• [product_link={{Посилання на товар}}].quantity → вибрати запис, де product_link збігається з нашим полем, і взяти quantity"
                        placeholder="data.models[].name"
                        value="${escHtml(jf.path||'')}"
                        oninput="updateJsonFieldAtPath('${pathStr}',${ji},'path',this.value)">
                 <input class="form-control" style="font-size:11px"
-                       title="Назва колонки (порожньо = авто з шляху)"
-                       placeholder="колонка"
+                       title="${isMatch ? 'Порожньо = значення пишеться в саме це поле; інакше — в колонку «поле_назва»' : 'Назва колонки (порожньо = авто з шляху)'}"
+                       placeholder="${isMatch ? 'це поле' : 'колонка'}"
                        value="${escHtml(jf.key||'')}"
                        oninput="updateJsonFieldAtPath('${pathStr}',${ji},'key',this.value)">
-                <select class="form-control" style="font-size:11px"
+                <select class="form-control" style="font-size:11px" ${isMatch ? 'disabled title="У режимі збігу формат не застосовується"' : ''}
                         onchange="updateJsonFieldAtPath('${pathStr}',${ji},'format',this.value);renderFieldRows()">
                   <option value="join"     ${fmt==='join'    ?'selected':''}>через роздільник</option>
                   <option value="template" ${fmt==='template'?'selected':''}>шаблон {поле}</option>
@@ -1644,7 +1660,8 @@ const _renderFieldItem = (f, pathStr, depth = 0) => {
                        oninput="updateJsonFieldAtPath('${pathStr}',${ji},'separator',this.value)">
                 <button class="btn btn-xs btn-danger" onclick="removeJsonFieldAtPath('${pathStr}',${ji})" title="Видалити">✕</button>
               </div>
-              ${isTemplate ? `
+              ${isMatch ? `<p style="font-size:10px;color:var(--text-2);margin:2px 0 0 2px">Режим збігу: береться запис JSON-масиву, у якого <b>${escHtml(String(jf.path).match(/^\[([^=\]]+)=/)[1])}</b> дорівнює значенню з поля запису; якщо збігу немає — лишається значення зі списку.</p>` : ''}
+              ${isTemplate && !isMatch ? `
               <div style="margin-top:3px;padding-left:2px;">
                 <input class="form-control" style="font-size:11px;font-family:monospace"
                        title="Шаблон рядка. Доступні поля: {id} {name} {brand_name} {industrial_code} {url} тощо"
