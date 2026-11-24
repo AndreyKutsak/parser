@@ -601,6 +601,13 @@ class ParserService {
                   pageRecords.map((rec, idx) => ({ rec, idx })),
                   followConcurrency,
                 );
+                // Пошукові підказки (режим збігу) — легкі JSON-запити: пауза між пачками береться з
+                // options.followDelay (за замовчуванням 500 мс), а не з options.delay, який задано
+                // під важкі сторінки (напр. 15 с) і робив би прогін на години.
+                const hasMatchFollow = [...fields.values()].some(
+                  (cfg) => cfg.type === 'лінк на іншу сторінку' && cfg.follow !== false && cfg.urlTemplate && parseMatchFields(cfg.jsonFields),
+                );
+                const followBatchDelay = hasMatchFollow ? (task.options?.followDelay > 0 ? task.options.followDelay : 500) : delay;
                 for (let fbi = 0; fbi < followBatches.length; fbi++) {
                   if (cancelledTasks.has(String(task._id))) break;
                   await Promise.all(
@@ -618,7 +625,7 @@ class ParserService {
                     ),
                   );
                   if (fbi < followBatches.length - 1) {
-                    await cancellableSleep(task._id, delay, delay * 2);
+                    await cancellableSleep(task._id, followBatchDelay, followBatchDelay * 2);
                   }
                 }
               }
