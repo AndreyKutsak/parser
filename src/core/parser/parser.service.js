@@ -636,20 +636,27 @@ class ParserService {
               logger.debug('[FOLLOW] hasFollowFields=%s records=%d fieldTypes=%j', hasFollowFields, pageRecords.length,
                 [...fields.entries()].map(([k, v]) => ({ k, type: v.type, follow: v.follow, hasSub: !!v.subSelectors && Object.keys(v.subSelectors || {}).length > 0 })));
               if (hasFollowFields && pageRecords.length) {
-                const followConcurrency = task.options?.detailConcurrency ?? 3;
+                const hasMatchFollow = [...fields.values()].some(
+                  (cfg) => cfg.type === 'лінк на іншу сторінку' && cfg.follow !== false && cfg.urlTemplate && parseMatchFields(cfg.jsonFields),
+                );
+                // Пошукові підказки (режим збігу): строго по одному запиту, без паралельних пачок —
+                // щоб не навантажувати чужий сервер (і щоб кожен наступний товар міг узятися з кешу
+                // попередньої відповіді). Пауза — лише після реального запиту (не після кешу):
+                // options.followDelay (за замовчуванням 1000 мс) з випадковим розкидом до ×2.
+                // options.delay тут не використовується — він задано під важкі сторінки (напр. 15 с).
+                const followConcurrency = hasMatchFollow ? 1 : (task.options?.detailConcurrency ?? 3);
                 const followBatches = chunk(
                   pageRecords.map((rec, idx) => ({ rec, idx })),
                   followConcurrency,
                 );
-                // Пошукові підказки (режим збігу) — легкі JSON-запити: пауза між пачками береться з
-                // options.followDelay (за замовчуванням 500 мс), а не з options.delay, який задано
-                // під важкі сторінки (напр. 15 с) і робив би прогін на години.
-                const hasMatchFollow = [...fields.values()].some(
-                  (cfg) => cfg.type === 'лінк на іншу сторінку' && cfg.follow !== false && cfg.urlTemplate && parseMatchFields(cfg.jsonFields),
-                );
-                const followBatchDelay = hasMatchFollow ? (task.options?.followDelay > 0 ? task.options.followDelay : 500) : delay;
+                const followBatchDelay = hasMatchFollow ? (task.options?.followDelay > 0 ? task.options.followDelay : 1000) : delay;
+                let requestsBefore = matchStats.requests;
                 for (let fbi = 0; fbi < followBatches.length; fbi++) {
                   if (cancelledTasks.has(String(task._id))) break;
+                  if (hasMatchFollow && fbi > 0 && matchStats.requests > requestsBefore) {
+                    await cancellableSleep(task._id, followBatchDelay, followBatchDelay * 2);
+                  }
+                  requestsBefore = matchStats.requests;
                   await Promise.all(
                     followBatches[fbi].map(({ rec, idx }) =>
                       this._followFields(rec, fields, currentUrl, {
@@ -666,7 +673,7 @@ class ParserService {
                       }),
                     ),
                   );
-                  if (fbi < followBatches.length - 1) {
+                  if (!hasMatchFollow && fbi < followBatches.length - 1) {
                     await cancellableSleep(task._id, followBatchDelay, followBatchDelay * 2);
                   }
                 }
@@ -1527,9 +1534,13 @@ class ParserService {
       return;
     }
 
+    const pause = ctx.followDelay > 0 ? ctx.followDelay : 1000;
+    let attempts = 0;
     for (const tpl of templates) {
       if (tplVarNames(tpl).some(v => rec[v] == null || rec[v] === '')) continue;
       const targetUrl = resolveUrl(substEncoded(tpl, rec), baseUrl);
+      // Запасний URL (|| …) — теж не впритул до попереднього запиту
+      if (attempts++ > 0) await cancellableSleep(ctx.taskId, pause, pause * 2);
       try {
         ctx.emit(ctx.taskId, { type: 'follow:start', runId: ctx.runId, url: targetUrl, field: fieldName, index: ctx.idx });
         stats.requests = (stats.requests || 0) + 1;
