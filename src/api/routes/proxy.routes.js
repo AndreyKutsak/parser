@@ -6,6 +6,7 @@ const {
   validateImport,
   validateVpnCreate,
   validateVpnUpdate,
+  validateVpnGateImport,
 } = require("../validators/proxy.validator");
 
 router.use(requireAuth);
@@ -13,6 +14,8 @@ router.use(requireAuth);
 router.get("/", proxy.list);
 router.post("/", validateProxy, proxy.create);
 router.post("/vpn", validateVpnCreate, proxy.createVpn);
+router.post("/vpn/import-vpngate", validateVpnGateImport, proxy.importVpnGate);
+router.get("/vpn/import-vpngate", proxy.importVpnGateStatus);
 router.put("/vpn/:id", validateVpnUpdate, proxy.updateVpn);
 router.post("/import", validateImport, proxy.importBulk);
 router.post("/bulk-delete", proxy.removeBulk);

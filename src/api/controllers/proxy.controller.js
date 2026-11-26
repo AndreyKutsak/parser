@@ -174,7 +174,10 @@ exports.checkSite = async (req, res, next) => {
   }
 };
 
-/** POST /api/proxies/vpn — додати VPN (WireGuard): { name, config, tags?, note? } */
+/**
+ * POST /api/proxies/vpn — додати VPN: { type?: 'wireguard'|'openvpn', name, config, username?, password?, tags?, note? }
+ * Тип визначається за вмістом конфігу (.conf WireGuard або .ovpn OpenVPN).
+ */
 exports.createVpn = async (req, res, next) => {
   try {
     const proxy = await proxyManager.addVpn(req.body);
@@ -184,7 +187,7 @@ exports.createVpn = async (req, res, next) => {
   }
 };
 
-/** PUT /api/proxies/vpn/:id — змінити VPN: { name?, config?, vpnEnabled?, tags?, note? } */
+/** PUT /api/proxies/vpn/:id — змінити VPN: { name?, config?, username?, password?, vpnEnabled?, tags?, note? } */
 exports.updateVpn = async (req, res, next) => {
   try {
     const proxy = await proxyManager.updateVpn(req.params.id, req.body);
@@ -194,10 +197,31 @@ exports.updateVpn = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/proxies/vpn/import-vpngate — запустити у фоні імпорт OpenVPN-серверів VPN Gate:
+ * { country?: 'ua', enable?: 5, maxServers?: 300 }. Прогрес — GET того ж шляху.
+ */
+exports.importVpnGate = async (req, res, next) => {
+  try {
+    const status = proxyManager.startVpnGateImport(req.body);
+    res.status(202).json({ success: true, status });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** GET /api/proxies/vpn/import-vpngate — стан останнього імпорту VPN Gate */
+exports.importVpnGateStatus = (req, res) => {
+  res.json({ success: true, status: proxyManager.getVpnGateImportStatus() });
+};
+
 exports.update = async (req, res, next) => {
   try {
     // Поля VPN змінюються лише через PUT /vpn/:id (з перевіркою конфігу)
-    const { wgConfig, kind, vpnStatus, vpnEnabled, vpnEndpoint, ...data } = req.body || {};
+    const {
+      wgConfig, ovpnConfig, kind, vpnType, vpnStatus, vpnEnabled, vpnEndpoint,
+      vpnUsername, vpnPassword, vpnNeedsAuth, vpnProto, vpnSource, ...data
+    } = req.body || {};
     const proxy = await proxyRepo.update(req.params.id, data);
     if (!proxy)
       return res

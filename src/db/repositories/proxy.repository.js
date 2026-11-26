@@ -159,11 +159,16 @@ class ProxyRepository {
     return { deleted: deletedCount };
   }
 
-  // ── VPN (WireGuard) ─────────────────────────────────────────────────────
+  // ── VPN (WireGuard / OpenVPN) ───────────────────────────────────────────
 
-  /** Усі VPN разом із конфігом (для vpn.daemon). */
+  /** Усі VPN разом із конфігом і паролем (для vpn.daemon). */
   async findVpnsWithConfig() {
-    return Proxy.find({ kind: "vpn" }).select("+wgConfig").lean();
+    return Proxy.find({ kind: "vpn" }).select("+wgConfig +ovpnConfig +vpnPassword").lean();
+  }
+
+  /** OpenVPN-записи за адресами «хост:порт» (для повторного імпорту без дублів). */
+  async findOpenVpnByEndpoints(endpoints) {
+    return Proxy.find({ kind: "vpn", vpnType: "openvpn", vpnEndpoint: { $in: endpoints } }).lean();
   }
 
   /** Вільний локальний порт для SOCKS5 нового VPN (діапазон 41001–41999). */

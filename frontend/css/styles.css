@@ -245,6 +245,11 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 }
 .tab.active { border-color: var(--primary); color: var(--primary); }
 .tab:hover  { color: var(--text); }
+/* Вкладки-кнопки (доступні з клавіатури): скидаємо стилі кнопки, лишаємо вигляд .tab */
+button.tab { background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; }
+button.tab.active { border-bottom-color: var(--primary); }
+button.tab:disabled { opacity: .4; cursor: not-allowed; }
+button.tab:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .tab-pane { display: none; }
 .tab-pane.active { display: block; }
 

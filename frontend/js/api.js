@@ -205,6 +205,8 @@ const API = (() => {
     checkSite: (id, url) => request("POST", `/proxies/${id}/check-site`, { url }),
     createVpn: (b) => request("POST", "/proxies/vpn", b),
     updateVpn: (id, b) => request("PUT", `/proxies/vpn/${id}`, b),
+    importVpnGate: (b) => request("POST", "/proxies/vpn/import-vpngate", b),
+    importVpnGateStatus: () => request("GET", "/proxies/vpn/import-vpngate"),
     checkAll: () => request("POST", "/proxies/check-all"),
     checkStatus: () => request("GET", "/proxies/check-status"),
     resetErrors: () => request("POST", "/proxies/reset-errors"),

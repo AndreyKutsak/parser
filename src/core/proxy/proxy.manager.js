@@ -4,7 +4,53 @@
 const proxyRepo = require("../../db/repositories/proxy.repository");
 const { validateProxy, validateBatch, precheck, checkSite } = require("./proxy.validator");
 const { validateWgConfig } = require("./wg-config");
+const { validateOvpnConfig } = require("./ovpn-config");
+const vpngate = require("./vpngate.importer");
 const logger = require("../../utils/logger");
+
+const badRequest = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
+
+/** Тип конфігу за вмістом: WireGuard має [Interface], OpenVPN — remote / <ca>. */
+const detectVpnType = (config, fallback) =>
+  /^\s*\[Interface\]/im.test(config) ? "wireguard"
+  : /^\s*remote\s/im.test(config) || /<ca>/i.test(config) ? "openvpn"
+  : fallback || "wireguard";
+
+/** Перевірка конфігу потрібного типу → поля запису або 400 з усіма помилками. */
+const vpnConfigFields = (type, config, { username, password } = {}) => {
+  if (type === "openvpn") {
+    const { errors, endpoint, proto, needsAuth } = validateOvpnConfig(config);
+    if (errors.length) throw badRequest(errors.join("; "));
+    if (needsAuth && !username) throw badRequest("Сервер вимагає логін і пароль (у .ovpn є auth-user-pass) — заповніть їх");
+    return {
+      vpnType: "openvpn", ovpnConfig: config, vpnEndpoint: endpoint, vpnProto: proto, vpnNeedsAuth: needsAuth,
+      ...(username ? { vpnUsername: username } : {}), ...(password ? { vpnPassword: password } : {}),
+    };
+  }
+  const { errors, endpoint } = validateWgConfig(config);
+  if (errors.length) throw badRequest(errors.join("; "));
+  return { vpnType: "wireguard", wgConfig: config, vpnEndpoint: endpoint };
+};
+
+const stripSecrets = (obj) => {
+  if (!obj) return obj;
+  delete obj.wgConfig;
+  delete obj.ovpnConfig;
+  delete obj.vpnPassword;
+  return obj;
+};
+
+/** Виконати fn для кожного елемента, не більше limit одночасно. */
+async function mapLimit(items, limit, fn) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+}
 
 class ProxyManager {
   constructor() {
@@ -72,45 +118,49 @@ class ProxyManager {
   }
 
   /**
-   * Новий VPN (WireGuard). Тунель підніме vpn.daemon за кілька секунд; до першої успішної
-   * перевірки VPN має status=inactive і в ротацію не потрапляє.
+   * Новий VPN (WireGuard .conf або OpenVPN .ovpn — тип визначається за вмістом). Тунель підніме
+   * vpn.daemon за кілька секунд; до першої успішної перевірки VPN має status=inactive і в ротацію не потрапляє.
    */
-  async addVpn({ name, config, tags = [], note }) {
-    const { errors, endpoint } = validateWgConfig(config);
-    if (errors.length) throw Object.assign(new Error(errors.join("; ")), { statusCode: 400 });
+  async addVpn({ type, name, config, username, password, tags = [], note, enabled = true, extra = {} }) {
+    const fields = vpnConfigFields(detectVpnType(config, type), config, { username, password });
     const port = await proxyRepo.nextFreeVpnPort();
     const proxy = await proxyRepo.create({
       kind: "vpn",
-      name: name || endpoint,
+      name: name || fields.vpnEndpoint,
       host: "127.0.0.1",
       port,
       protocol: "socks5",
-      wgConfig: config,
-      vpnEndpoint: endpoint,
-      vpnEnabled: true,
-      vpnStatus: "starting",
+      ...fields,
+      vpnEnabled: enabled,
+      vpnStatus: enabled ? "starting" : "stopped",
       status: "inactive",
       tags,
       note,
+      ...extra,
     });
     this._invalidateCache();
-    const obj = proxy.toObject();
-    delete obj.wgConfig;
-    return obj;
+    return stripSecrets(proxy.toObject());
   }
 
-  /** Змінити VPN: назву, конфіг (порожній — лишається старий), увімкнути/вимкнути. */
-  async updateVpn(id, { name, config, vpnEnabled, tags, note }) {
+  /** Змінити VPN: назву, конфіг (порожній — лишається старий), логін/пароль, увімкнути/вимкнути. */
+  async updateVpn(id, { name, config, username, password, vpnEnabled, tags, note }) {
     const proxy = await proxyRepo.findById(id);
     if (!proxy || proxy.kind !== "vpn") throw Object.assign(new Error("VPN не знайдено"), { statusCode: 404 });
+    const type = proxy.vpnType || "wireguard";
     const set = {};
     if (name !== undefined) set.name = name;
     if (tags !== undefined) set.tags = tags;
     if (note !== undefined) set.note = note;
+    if (type === "openvpn") {
+      if (username) set.vpnUsername = username;
+      if (password) set.vpnPassword = password;
+    }
     if (config) {
-      const { errors, endpoint } = validateWgConfig(config);
-      if (errors.length) throw Object.assign(new Error(errors.join("; ")), { statusCode: 400 });
-      Object.assign(set, { wgConfig: config, vpnEndpoint: endpoint, vpnStatus: "starting", status: "inactive" });
+      if (detectVpnType(config, type) !== type) {
+        throw badRequest(`Цей запис — ${type === "openvpn" ? "OpenVPN, потрібен .ovpn" : "WireGuard, потрібен .conf"}. Для іншого типу додайте новий VPN.`);
+      }
+      const fields = vpnConfigFields(type, config, { username: username || proxy.vpnUsername, password });
+      Object.assign(set, fields, { vpnStatus: "starting", status: "inactive" });
     }
     if (vpnEnabled !== undefined) {
       set.vpnEnabled = !!vpnEnabled;
@@ -119,7 +169,94 @@ class ProxyManager {
     }
     const updated = await proxyRepo.update(id, set);
     this._invalidateCache();
-    return updated;
+    return stripSecrets(updated && (updated.toObject ? updated.toObject() : updated));
+  }
+
+  // ── Імпорт VPN Gate ──────────────────────────────────────────────────────
+
+  getVpnGateImportStatus() {
+    return this._vpngateStatus || { running: false };
+  }
+
+  /**
+   * Запустити у фоні імпорт OpenVPN-серверів VPN Gate для країни (список — vpnhub.me, .ovpn — vpngate.net).
+   * Нові записи додаються вимкненими, крім перших `enable` (кожен увімкнений — процес openvpn на сервері).
+   * Повторний імпорт оновлює конфіги вже доданих серверів (за хостом:портом), дублів не створює.
+   */
+  startVpnGateImport({ country = "ua", enable = 5, maxServers = 300 } = {}) {
+    if (this._vpngateStatus?.running) throw Object.assign(new Error("Імпорт VPN Gate уже виконується"), { statusCode: 409 });
+    const st = {
+      running: true, country, stage: "list", page: 0, pages: 0, found: 0, done: 0,
+      added: 0, updated: 0, enabled: 0, failed: 0, errors: [], startedAt: new Date(),
+    };
+    this._vpngateStatus = st;
+    this._runVpnGateImport(st, { country, enable, maxServers })
+      .catch((e) => { st.error = e.message; })
+      .finally(() => {
+        st.running = false;
+        st.finishedAt = new Date();
+        this._invalidateCache();
+        logger.info("[VPN Gate] імпорт завершено", { country, found: st.found, added: st.added, updated: st.updated, failed: st.failed, error: st.error });
+      });
+    return st;
+  }
+
+  async _runVpnGateImport(st, { country, enable, maxServers }) {
+    const servers = await vpngate.listServers(country, {
+      maxServers,
+      onProgress: (p) => Object.assign(st, { page: p.page, pages: p.pages, found: p.found }),
+    });
+    Object.assign(st, { stage: "download", found: servers.length });
+
+    // Завантаження .ovpn — паралельно (по 4), запис у БД — послідовно (порти виділяються по черзі)
+    const configs = new Array(servers.length);
+    await mapLimit(servers, 4, async (s, i) => {
+      try {
+        configs[i] = await vpngate.downloadConfig(s);
+      } catch (e) {
+        st.failed++;
+        if (st.errors.length < 10) st.errors.push(`${s.host}: ${e.message}`);
+      }
+      st.done++;
+    });
+
+    st.stage = "save";
+    const existing = new Map(
+      (await proxyRepo.findOpenVpnByEndpoints(servers.map((s) => `${s.host}:${s.port}`))).map((p) => [p.vpnEndpoint, p]),
+    );
+    let toEnable = enable;
+    const cc = country.toUpperCase();
+    for (let i = 0; i < servers.length; i++) {
+      const s = servers[i];
+      const config = configs[i];
+      if (!config) continue;
+      const note = `VPN Gate · ${s.country} · протоколи: ${s.protocols.join(", ").toUpperCase()} · SSL/L2TP/SSTP: ${s.username} / ${s.password}`;
+      try {
+        const ex = existing.get(`${s.host}:${s.port}`);
+        if (ex) {
+          await proxyRepo.update(ex._id, { ...vpnConfigFields("openvpn", config, s), note });
+          st.updated++;
+        } else {
+          const on = toEnable > 0;
+          await this.addVpn({
+            type: "openvpn",
+            name: `${cc} · ${s.host.replace(/\.opengw\.net$/, "")} (${s.proto} ${s.port})`,
+            config,
+            username: s.username,
+            password: s.password,
+            tags: ["vpngate", cc],
+            note,
+            enabled: on,
+            extra: { vpnSource: "vpngate", country: cc },
+          });
+          st.added++;
+          if (on) { toEnable--; st.enabled++; }
+        }
+      } catch (e) {
+        st.failed++;
+        if (st.errors.length < 10) st.errors.push(`${s.host}: ${e.message}`);
+      }
+    }
   }
 
   /**

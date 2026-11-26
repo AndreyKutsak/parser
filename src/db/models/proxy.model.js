@@ -25,13 +25,20 @@ const proxySchema = new mongoose.Schema({
   tags:    [{ type: String }],
   note:    { type: String },
 
-  // ── VPN (WireGuard) ───────────────────────────────────────────────────────
-  // kind='vpn': тунель піднімає окремий процес vpn.daemon (wireproxy), а парсер ходить через
+  // ── VPN (WireGuard / OpenVPN) ─────────────────────────────────────────────
+  // kind='vpn': тунель піднімає окремий процес vpn.daemon (wireproxy або openvpn), а парсер ходить через
   // локальний SOCKS5 host=127.0.0.1:port — для решти коду це звичайний socks5-проксі.
   kind:        { type: String, enum: ['proxy', 'vpn'], default: 'proxy' },
   name:        { type: String },                     // назва для людини, напр. «NL Amsterdam»
+  vpnType:     { type: String, enum: ['wireguard', 'openvpn'] }, // відсутній у старих записах = wireguard
   wgConfig:    { type: String, select: false },      // вміст .conf (містить приватний ключ — не віддаємо в API)
-  vpnEndpoint: { type: String },                     // Endpoint з [Peer] — для показу в списку
+  ovpnConfig:  { type: String, select: false },      // вміст .ovpn (містить ключ клієнта — не віддаємо в API)
+  vpnNeedsAuth:{ type: Boolean },                    // у .ovpn є auth-user-pass — потрібні логін і пароль
+  vpnUsername: { type: String },
+  vpnPassword: { type: String, select: false },
+  vpnProto:    { type: String },                     // OpenVPN: tcp / udp
+  vpnSource:   { type: String },                     // звідки імпортовано: 'vpngate' або порожньо (вручну)
+  vpnEndpoint: { type: String },                     // Endpoint з [Peer] / remote з .ovpn — для показу в списку
   vpnEnabled:  { type: Boolean, default: true },     // false — тунель зупинено
   vpnStatus:   { type: String, enum: ['starting', 'running', 'error', 'stopped'] },
   vpnError:    { type: String },

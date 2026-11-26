@@ -29,7 +29,10 @@ const buildAgents = (proxy) => {
   const auth = username
     ? `${encodeURIComponent(username)}:${encodeURIComponent(password || "")}@`
     : "";
-  const url = `${protocol}://${auth}${host}:${port}`;
+  // OpenVPN-тунель: ім'я сайту резолвить сам SOCKS-сервер через тунель (socks5h). Інакше агент резолвив би
+  // локально й міг передати IPv6-адресу, якої в тунелі VPN Gate немає.
+  const scheme = proxy.vpnType === "openvpn" ? "socks5h" : protocol;
+  const url = `${scheme}://${auth}${host}:${port}`;
 
   if (protocol.startsWith("socks")) {
     const agent = new SocksProxyAgent(url);

@@ -790,8 +790,11 @@
               >
                 Видалити неробочі
               </button>
+              <button class="btn btn-ghost btn-sm" onclick="openVpnGateModal()" title="Безкоштовні OpenVPN-сервери VPN Gate за країною">
+                Імпорт VPN Gate
+              </button>
               <button class="btn btn-ghost btn-sm" onclick="openVpnModal()">
-                + VPN (WireGuard)
+                + VPN
               </button>
               <button id="btn-import-proxy-open" class="btn btn-primary">
                 + Імпорт проксі
@@ -1796,7 +1799,7 @@
                 <select id="tf-proxy-choice" class="form-control"></select>
                 <p class="form-hint">
                   Ротація — кожен запуск і кожна повторна спроба бере наступний робочий зі списку.
-                  VPN додаються в розділі «Проксі» → «+ VPN (WireGuard)».
+                  VPN додаються в розділі «Проксі» → «+ VPN» або «Імпорт VPN Gate».
                 </p>
               </div>
             </div>
@@ -1955,39 +1958,96 @@
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════════
-     МОДАЛЬНЕ ВІКНО VPN (WireGuard)
+     МОДАЛЬНЕ ВІКНО VPN (WireGuard / OpenVPN)
 ═══════════════════════════════════════════════════════════════════ -->
     <div class="modal-overlay" id="vpn-modal">
       <div class="modal" style="max-width: 620px">
         <div class="modal-header">
-          <span id="vpn-modal-title">Додати VPN (WireGuard)</span>
+          <span id="vpn-modal-title">Додати VPN</span>
           <button class="btn-close" onclick="closeVpnModal()">×</button>
         </div>
         <div class="modal-body">
           <input type="hidden" id="vpn-edit-id" />
+          <div class="tabs" id="vpn-type-tabs" role="tablist" aria-label="Тип VPN">
+            <button type="button" class="tab active" role="tab" data-vpntype="wireguard" onclick="setVpnType('wireguard')">WireGuard</button>
+            <button type="button" class="tab" role="tab" data-vpntype="openvpn" onclick="setVpnType('openvpn')">OpenVPN</button>
+          </div>
           <div class="form-group">
-            <label class="form-label">Назва</label>
+            <label class="form-label" for="vpn-name">Назва</label>
             <input id="vpn-name" class="form-control" placeholder="напр. Нідерланди, Амстердам" />
           </div>
           <div class="form-group">
-            <label class="form-label">WireGuard-конфіг (.conf)</label>
+            <label class="form-label" for="vpn-config" id="vpn-config-label">WireGuard-конфіг (.conf)</label>
             <textarea
               id="vpn-config"
               class="form-control"
               rows="12"
               spellcheck="false"
               style="font-family: var(--font-mono, monospace); font-size: 12px"
-              placeholder="[Interface]&#10;PrivateKey = …&#10;Address = 10.2.0.2/32&#10;DNS = 10.2.0.1&#10;&#10;[Peer]&#10;PublicKey = …&#10;AllowedIPs = 0.0.0.0/0&#10;Endpoint = 185.1.2.3:51820"
             ></textarea>
-            <p class="form-hint" id="vpn-config-hint">
-              Вставте вміст файлу <code>.conf</code>, який видає VPN-сервіс для WireGuard.
-              Тунель піднімається лише для парсера: мережа сервера, SSH і сайт не змінюються.
-            </p>
+            <p class="form-hint" id="vpn-config-hint"></p>
           </div>
+          <div class="form-row" id="vpn-auth-row" style="display: none">
+            <div class="form-group">
+              <label class="form-label" for="vpn-username">Логін</label>
+              <input id="vpn-username" class="form-control" autocomplete="off" placeholder="vpn" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="vpn-password">Пароль</label>
+              <input id="vpn-password" class="form-control" type="password" autocomplete="new-password" placeholder="vpn" />
+            </div>
+          </div>
+          <p class="form-hint" id="vpn-auth-hint" style="display: none; margin-top: -8px">
+            Потрібні, лише якщо в .ovpn є рядок <code>auth-user-pass</code>. Для серверів VPN Gate це vpn / vpn.
+          </p>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="closeVpnModal()">Скасувати</button>
           <button class="btn btn-primary" id="btn-save-vpn" onclick="saveVpn()">Зберегти</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+     МОДАЛЬНЕ ВІКНО ІМПОРТУ VPN GATE
+═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="vpngate-modal">
+      <div class="modal" style="max-width: 520px">
+        <div class="modal-header">
+          <span>Імпорт серверів VPN Gate</span>
+          <button class="btn-close" onclick="closeVpnGateModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <p style="margin: 0 0 16px; color: var(--text-2); font-size: 13px; line-height: 1.5">
+            Безкоштовні OpenVPN-сервери волонтерів VPN Gate (*.opengw.net). Список береться з vpnhub.me,
+            конфіги — з vpngate.net. Повторний імпорт оновлює вже додані сервери й додає нові.
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="vpngate-country">Країна</label>
+              <select id="vpngate-country" class="form-control">
+                <option value="ua">Україна</option>
+                <option value="pl">Польща</option>
+                <option value="de">Німеччина</option>
+                <option value="nl">Нідерланди</option>
+                <option value="jp">Японія</option>
+                <option value="us">США</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="vpngate-enable">Одразу увімкнути</label>
+              <input id="vpngate-enable" class="form-control" type="number" min="0" max="50" value="5" />
+            </div>
+          </div>
+          <p class="form-hint" style="margin-top: -8px">
+            Решта нових серверів додається вимкненими — вмикайте їх кнопкою ▶. Кожен увімкнений сервер — окремий
+            процес openvpn на сервері, тому одночасно працює не більше 10.
+          </p>
+          <div id="vpngate-progress" style="display: none; margin-top: 16px; font-size: 13px" aria-live="polite"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeVpnGateModal()">Закрити</button>
+          <button class="btn btn-primary" id="btn-vpngate-import" onclick="startVpnGateImport()">Імпортувати</button>
         </div>
       </div>
     </div>

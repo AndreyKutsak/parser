@@ -32,18 +32,29 @@ const validate = (schema) => (req, res, next) => {
 };
 
 const vpnCreateSchema = Joi.object({
-  name:   Joi.string().max(100).allow('', null),
-  config: Joi.string().max(20000).required().messages({ 'any.required': 'Вставте WireGuard-конфіг (.conf)' }),
-  tags:   Joi.array().items(Joi.string()).default([]),
-  note:   Joi.string().max(500).allow('', null),
+  type:     Joi.string().valid('wireguard', 'openvpn').default('wireguard'),
+  name:     Joi.string().max(100).allow('', null),
+  config:   Joi.string().max(60000).required().messages({ 'any.required': 'Вставте конфіг VPN (.conf або .ovpn)' }),
+  username: Joi.string().max(200).allow('', null), // OpenVPN: якщо в .ovpn є auth-user-pass
+  password: Joi.string().max(200).allow('', null),
+  tags:     Joi.array().items(Joi.string()).default([]),
+  note:     Joi.string().max(500).allow('', null),
 });
 
 const vpnUpdateSchema = Joi.object({
   name:       Joi.string().max(100).allow('', null),
-  config:     Joi.string().max(20000).allow('', null), // порожній — лишається старий конфіг
+  config:     Joi.string().max(60000).allow('', null), // порожній — лишається старий конфіг
+  username:   Joi.string().max(200).allow('', null),
+  password:   Joi.string().max(200).allow('', null), // порожній — лишається старий пароль
   vpnEnabled: Joi.boolean(),
   tags:       Joi.array().items(Joi.string()),
   note:       Joi.string().max(500).allow('', null),
+});
+
+const vpnGateImportSchema = Joi.object({
+  country:    Joi.string().pattern(/^[a-z]{2}$/).default('ua'),
+  enable:     Joi.number().integer().min(0).max(50).default(5), // скільки нових тунелів одразу увімкнути
+  maxServers: Joi.number().integer().min(1).max(500).default(300),
 });
 
 module.exports = {
@@ -51,4 +62,5 @@ module.exports = {
   validateImport: validate(importSchema),
   validateVpnCreate: validate(vpnCreateSchema),
   validateVpnUpdate: validate(vpnUpdateSchema),
+  validateVpnGateImport: validate(vpnGateImportSchema),
 };

@@ -3450,8 +3450,8 @@ const renderProxiesTable = ({ items, total, page, pages }) => {
     <tr${p.kind === "vpn" && p.vpnEnabled === false ? ' style="opacity:.55"' : ""}>
       <td>
         ${p.kind === "vpn"
-          ? `<span class="badge badge-running">VPN</span> <strong>${escHtml(p.name || "WireGuard")}</strong>
-             <div style="font-size:11px;color:var(--text-2);margin-top:2px">${escHtml(p.vpnEndpoint || "")} · локально socks5 :${p.port}</div>
+          ? `<span class="badge badge-running">${p.vpnType === "openvpn" ? "OpenVPN" : "WireGuard"}</span> <strong>${escHtml(p.name || p.vpnEndpoint || "VPN")}</strong>
+             <div style="font-size:11px;color:var(--text-2);margin-top:2px">${escHtml(p.vpnEndpoint || "")}${p.vpnProto ? ` (${p.vpnProto})` : ""} · локально socks5 :${p.port}</div>
              ${vpnStateHtml(p)}`
           : `<code>${p.protocol.toUpperCase()}://${p.host}:${p.port}</code>`}
         ${siteCheckHtml(p)}
@@ -3551,30 +3551,79 @@ const siteCheckHtml = (p) => {
   return `<div style="font-size:11px;color:var(--text-2);margin-top:2px" title="${escHtml(c.url)} · ${UI.fmtDate(c.at)}">${escHtml(host)}: ${res}</div>`;
 };
 
+const VPN_TYPES = {
+  wireguard: {
+    label: "WireGuard-конфіг (.conf)",
+    placeholder: "[Interface]\nPrivateKey = …\nAddress = 10.2.0.2/32\nDNS = 10.2.0.1\n\n[Peer]\nPublicKey = …\nAllowedIPs = 0.0.0.0/0\nEndpoint = 185.1.2.3:51820",
+    hint: "Вставте вміст файлу <code>.conf</code>, який видає VPN-сервіс для WireGuard.",
+  },
+  openvpn: {
+    label: "OpenVPN-конфіг (.ovpn)",
+    placeholder: "client\ndev tun\nproto udp\nremote vpn968970619.opengw.net 9813\ncipher AES-128-CBC\n…\n<ca>\n-----BEGIN CERTIFICATE-----\n…\n</ca>",
+    hint: "Вставте вміст файлу <code>.ovpn</code> — для VPN Gate це кнопка OpenVPN → Download на сайті. Сертифікати мають бути всередині файлу (блоки &lt;ca&gt;, &lt;cert&gt;, &lt;key&gt;).",
+  },
+};
+const VPN_NOTE = " Тунель піднімається лише для парсера: мережа сервера, SSH і сайт не змінюються.";
+let vpnModalType = "wireguard";
+
+/** Перемикач WireGuard / OpenVPN у формі VPN. При редагуванні тип не змінюється. */
+const setVpnType = (type, { locked = false } = {}) => {
+  vpnModalType = type;
+  const t = VPN_TYPES[type];
+  document.querySelectorAll("#vpn-type-tabs .tab").forEach((el) => {
+    const on = el.dataset.vpntype === type;
+    el.classList.toggle("active", on);
+    el.setAttribute("aria-selected", on ? "true" : "false");
+    el.disabled = locked && !on;
+  });
+  document.getElementById("vpn-config-label").textContent = t.label;
+  document.getElementById("vpn-config").placeholder = t.placeholder;
+  const editing = !!document.getElementById("vpn-edit-id").value;
+  document.getElementById("vpn-config-hint").innerHTML = editing
+    ? "Конфіг збережено на сервері й не показується (там приватні ключі). Вставте новий, лише якщо треба замінити; порожнє поле — лишається старий."
+    : t.hint + VPN_NOTE;
+  const ovpn = type === "openvpn";
+  document.getElementById("vpn-auth-row").style.display = ovpn ? "" : "none";
+  document.getElementById("vpn-auth-hint").style.display = ovpn ? "" : "none";
+};
+
 const openVpnModal = (id = null) => {
   const p = id ? state.proxies.find((x) => x._id === id) : null;
   document.getElementById("vpn-edit-id").value = id || "";
   document.getElementById("vpn-name").value = p?.name || "";
   document.getElementById("vpn-config").value = "";
-  document.getElementById("vpn-modal-title").textContent = p ? `VPN: ${p.name || p.vpnEndpoint}` : "Додати VPN (WireGuard)";
-  document.getElementById("vpn-config-hint").innerHTML = p
-    ? "Конфіг збережено на сервері й не показується (там приватний ключ). Вставте новий, лише якщо треба замінити; порожнє поле — лишається старий."
-    : "Вставте вміст файлу <code>.conf</code>, який видає VPN-сервіс для WireGuard. Тунель піднімається лише для парсера: мережа сервера, SSH і сайт не змінюються.";
+  document.getElementById("vpn-username").value = p ? p.vpnUsername || "" : "vpn";
+  document.getElementById("vpn-password").value = p ? "" : "vpn";
+  document.getElementById("vpn-password").placeholder = p ? "без змін" : "vpn";
+  document.getElementById("vpn-modal-title").textContent = p ? `VPN: ${p.name || p.vpnEndpoint}` : "Додати VPN";
+  setVpnType(p?.vpnType === "openvpn" ? "openvpn" : p ? "wireguard" : vpnModalType, { locked: !!p });
   document.getElementById("vpn-modal").classList.add("open");
 };
 
 const closeVpnModal = () => document.getElementById("vpn-modal").classList.remove("open");
 
+// Вставили .ovpn у вкладці WireGuard (або навпаки) — перемикаємо тип самі
+document.addEventListener("input", (e) => {
+  if (e.target?.id !== "vpn-config" || document.getElementById("vpn-edit-id").value) return;
+  const v = e.target.value;
+  if (/^\s*\[Interface\]/im.test(v) && vpnModalType !== "wireguard") setVpnType("wireguard");
+  else if ((/^\s*remote\s/im.test(v) || /<ca>/i.test(v)) && vpnModalType !== "openvpn") setVpnType("openvpn");
+});
+
 const saveVpn = async () => {
   const id = document.getElementById("vpn-edit-id").value;
   const name = document.getElementById("vpn-name").value.trim();
   const config = document.getElementById("vpn-config").value.trim();
-  if (!id && !config) return UI.toast("Вставте WireGuard-конфіг", "warning");
+  const ovpn = vpnModalType === "openvpn";
+  const username = ovpn ? document.getElementById("vpn-username").value.trim() : "";
+  const password = ovpn ? document.getElementById("vpn-password").value : "";
+  if (!id && !config) return UI.toast(ovpn ? "Вставте вміст файлу .ovpn" : "Вставте WireGuard-конфіг", "warning");
   const btn = document.getElementById("btn-save-vpn");
   UI.loading(btn, true);
   try {
-    if (id) await API.proxies.updateVpn(id, { name, ...(config ? { config } : {}) });
-    else await API.proxies.createVpn({ name, config });
+    const creds = { ...(username ? { username } : {}), ...(password ? { password } : {}) };
+    if (id) await API.proxies.updateVpn(id, { name, ...(config ? { config } : {}), ...creds });
+    else await API.proxies.createVpn({ type: vpnModalType, name, config, ...creds });
     UI.toast(id ? "VPN збережено" : "VPN додано — тунель підключиться за кілька секунд", "success");
     closeVpnModal();
     loadProxies();
@@ -3591,9 +3640,92 @@ const toggleVpn = async (id, enable) => {
     await API.proxies.updateVpn(id, { vpnEnabled: enable });
     UI.toast(enable ? "VPN увімкнено — підключення…" : "VPN вимкнено", "success");
     loadProxies();
-    if (enable) setTimeout(() => state.currentPage === "proxies" && loadProxies(), 8000);
+    if (enable) {
+      // WireGuard піднімається за секунди, OpenVPN — до хвилини
+      setTimeout(() => state.currentPage === "proxies" && loadProxies(), 8000);
+      setTimeout(() => state.currentPage === "proxies" && loadProxies(), 30000);
+    }
   } catch (err) {
     UI.toast(err.message, "error");
+  }
+};
+
+// ── Імпорт VPN Gate ──────────────────────────────────────────────────────
+let vpnGatePollTimer = null;
+
+const renderVpnGateStatus = (st) => {
+  const box = document.getElementById("vpngate-progress");
+  const btn = document.getElementById("btn-vpngate-import");
+  if (!st || (!st.running && !st.finishedAt)) {
+    box.style.display = "none";
+    btn.disabled = false;
+    return;
+  }
+  box.style.display = "";
+  btn.disabled = !!st.running;
+  let html;
+  if (st.running) {
+    html =
+      st.stage === "list"
+        ? `Збираю список серверів: сторінка ${st.page || 1}${st.pages ? ` з ${st.pages}` : ""}, знайдено ${st.found}`
+        : st.stage === "download"
+          ? `Завантажую конфіги: ${st.done} з ${st.found}`
+          : "Зберігаю сервери…";
+  } else if (st.error) {
+    html = `<span style="color:var(--danger)">Імпорт не вдався: ${escHtml(st.error)}</span>`;
+  } else {
+    html =
+      `Готово. Знайдено серверів: <b>${st.found}</b>, додано <b>${st.added}</b>` +
+      (st.enabled ? ` (увімкнено ${st.enabled})` : "") +
+      `, оновлено ${st.updated}` +
+      (st.failed ? `, <span style="color:var(--danger)">не вдалося ${st.failed}</span>` : "") +
+      ".";
+  }
+  if (st.errors?.length && !st.running) {
+    html += `<div class="form-hint" style="margin-top:6px">${st.errors.slice(0, 3).map(escHtml).join("<br>")}</div>`;
+  }
+  box.innerHTML = html;
+};
+
+const pollVpnGateImport = async () => {
+  clearTimeout(vpnGatePollTimer);
+  try {
+    const { status } = await API.proxies.importVpnGateStatus();
+    renderVpnGateStatus(status);
+    if (status?.running) {
+      vpnGatePollTimer = setTimeout(pollVpnGateImport, 1500);
+    } else if (status?.finishedAt && state.currentPage === "proxies") {
+      loadProxies();
+    }
+  } catch (err) {
+    UI.toast(err.message, "error");
+  }
+};
+
+const openVpnGateModal = () => {
+  document.getElementById("vpngate-modal").classList.add("open");
+  pollVpnGateImport();
+};
+
+const closeVpnGateModal = () => {
+  clearTimeout(vpnGatePollTimer);
+  document.getElementById("vpngate-modal").classList.remove("open");
+};
+
+const startVpnGateImport = async () => {
+  const country = document.getElementById("vpngate-country").value;
+  const enable = Math.max(0, Math.min(50, parseInt(document.getElementById("vpngate-enable").value, 10) || 0));
+  const btn = document.getElementById("btn-vpngate-import");
+  UI.loading(btn, true);
+  let status = null;
+  try {
+    ({ status } = await API.proxies.importVpnGate({ country, enable }));
+    vpnGatePollTimer = setTimeout(pollVpnGateImport, 1000);
+  } catch (err) {
+    UI.toast(err.message, "error");
+  } finally {
+    UI.loading(btn, false); // повертає кнопці текст; далі renderVpnGateStatus блокує її, поки імпорт іде
+    if (status) renderVpnGateStatus(status);
   }
 };
 
@@ -4722,7 +4854,11 @@ Object.assign(window, {
   openVpnModal,
   closeVpnModal,
   saveVpn,
+  setVpnType,
   toggleVpn,
+  openVpnGateModal,
+  closeVpnGateModal,
+  startVpnGateImport,
   openSiteCheck,
   runSiteCheck,
   toggleProxyChoice,

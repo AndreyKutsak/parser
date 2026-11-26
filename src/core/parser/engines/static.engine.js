@@ -43,7 +43,9 @@ const buildProxyAgent = (proxy) => {
   if (!proxy) return null;
   const { protocol, host, port, username, password } = proxy;
   const auth = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : '';
-  const proxyUrl = `${protocol}://${auth}${host}:${port}`;
+  // OpenVPN-тунель: DNS через тунель (socks5h) — див. core/proxy/proxy.validator.js buildAgents
+  const scheme = proxy.vpnType === 'openvpn' ? 'socks5h' : protocol;
+  const proxyUrl = `${scheme}://${auth}${host}:${port}`;
 
   const cached = proxyAgentCache.get(proxyUrl);
   if (cached) return cached;
