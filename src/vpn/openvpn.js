@@ -17,6 +17,9 @@ const { spawn, spawnSync, execFileSync } = require("child_process");
 const BIN = process.env.OPENVPN_BIN || "openvpn";
 const USE_SUDO = process.env.VPN_SUDO !== "0" && typeof process.getuid === "function" && process.getuid() !== 0;
 
+// Сервер спільний (HestiaCP): головна таблиця маршрутизації має лишатися такою, як була.
+// Ядро при ifconfig саме додає в main маршрут до підмережі тунелю (напр. 10.211.0.0/16) — переносимо
+// його в таблицю тунелю. Тоді в тунель потрапляє лише трафік, що виходить з IP тунелю (наш SOCKS).
 const ROUTE_SCRIPT = `#!/bin/sh
 # Викликає openvpn (від root) при піднятті/знятті тунелю парсера. Згенеровано vpn.daemon.
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -25,12 +28,29 @@ T="$PARSER_TABLE"; P="$PARSER_PRIO"
 while ip rule del lookup "$T" 2>/dev/null; do :; done
 ip route flush table "$T" 2>/dev/null
 if [ "$script_type" = "up" ]; then
+  ip -4 route show table main dev "$dev" | while read -r R; do
+    ip route del $R dev "$dev" table main 2>/dev/null
+    ip route replace $R dev "$dev" table "$T" 2>/dev/null
+  done
   ip route replace default dev "$dev" table "$T" || exit 1
   ip rule add from "$ifconfig_local" lookup "$T" priority "$P" || exit 1
   sysctl -qw "net.ipv4.conf.$dev.rp_filter=2" 2>/dev/null
 fi
 exit 0
 `;
+
+/**
+ * /dev/net/tun у контейнері OpenVZ створюється вручну й може зникнути після перезавантаження —
+ * відтворюємо перед запуском openvpn (сам доступ до TUN дає хостинг; тут лише вузол пристрою).
+ */
+function ensureTunDevice() {
+  if (fs.existsSync("/dev/net/tun")) return;
+  const run = (cmd) =>
+    USE_SUDO ? spawnSync("sudo", ["-n", ...cmd], { timeout: 5000 }) : spawnSync(cmd[0], cmd.slice(1), { timeout: 5000 });
+  run(["mkdir", "-p", "/dev/net"]);
+  run(["mknod", "/dev/net/tun", "c", "10", "200"]);
+  run(["chmod", "600", "/dev/net/tun"]);
+}
 
 /** Ім'я пристрою, таблиця й пріоритет правила — від локального порту SOCKS (41001–41999), унікальні. */
 const netParams = (port) => ({ dev: `pvpn${port}`, table: port, priority: 10000 + (port % 1000) });
@@ -71,6 +91,7 @@ function removeFiles(dir, id) {
 }
 
 function spawnOpenVpn(file) {
+  ensureTunDevice();
   const args = ["--config", file];
   return USE_SUDO
     ? spawn("sudo", ["-n", BIN, ...args], { stdio: ["ignore", "pipe", "pipe"] })

@@ -175,6 +175,8 @@ function startOpenVpn(id, vpn, t) {
     if (t.socks) return runCheck();
     const socks = createSocksServer({
       getLocalAddress: () => t.localAddress,
+      // Спільний сервер: через наш VPN ходять лише процеси парсера (той самий користувач) і root
+      allowUids: process.platform === "linux" ? [...new Set([process.getuid(), 0])] : null,
       onError: (msg, meta) => logger.debug("[VPN] socks", { id, msg, ...meta }),
     });
     socks.on("error", (e) => {

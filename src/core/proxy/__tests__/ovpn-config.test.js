@@ -117,6 +117,23 @@ describe('ovpn-config', () => {
   });
 });
 
+describe('ovpn-route.sh', () => {
+  test('головна таблиця: маршрут підмережі тунелю переноситься в таблицю тунелю', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const ovpn = require('../../../vpn/openvpn');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pvpn-'));
+    const file = ovpn.writeFiles(dir, 'x', { port: 41001, ovpnConfig: VPNGATE }, buildOpenVpnConfig);
+    const script = fs.readFileSync(path.join(dir, 'ovpn-route.sh'), 'utf8');
+    expect(script).toMatch(/route show table main dev "\$dev"/);
+    expect(script).toMatch(/ip route del \$R dev "\$dev" table main/);
+    expect(script).not.toMatch(/ip route (add|replace) default dev "\$dev"\s*$/m); // default лише в таблиці тунелю
+    expect(fs.readFileSync(file, 'utf8')).toMatch(/^dev pvpn41001$/m);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('vpngate.importer parseListPage', () => {
   test('рядки каталогу vpnhub: хост, hid, порти, логін SSL, остання сторінка', () => {
     const html = `

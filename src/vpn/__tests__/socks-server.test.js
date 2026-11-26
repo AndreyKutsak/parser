@@ -67,6 +67,39 @@ describe('socks-server', () => {
     localAddress = '127.0.0.1';
   });
 
+  test('allowUids: з\'єднання чужого користувача відхиляється, свого — проходить', async () => {
+    let uid = 1001;
+    const guarded = createSocksServer({
+      getLocalAddress: () => '127.0.0.1',
+      resolve: async () => '127.0.0.1',
+      allowUids: [1000, 0],
+      peerUid: async () => uid,
+    });
+    const port = await listen(guarded);
+    const get = () => axios.get(`http://127.0.0.1:${webPort}/g`, {
+      httpAgent: new SocksProxyAgent(`socks5://127.0.0.1:${port}`), proxy: false, timeout: 5000,
+    });
+    await expect(get()).rejects.toThrow();
+    uid = 1000;
+    await expect(get()).resolves.toMatchObject({ data: 'ok /g from 127.0.0.1' });
+    uid = null; // власника не визначено — теж відмова
+    await expect(get()).rejects.toThrow();
+    await close(guarded);
+  });
+
+  test('localPeerUid: розбір /proc/net/tcp (лише Linux)', async () => {
+    const { localPeerUid } = require('../socks-server');
+    if (process.platform !== 'linux') {
+      await expect(localPeerUid({ remotePort: 1, localPort: 2 })).resolves.toBeNull();
+      return;
+    }
+    const s = net.connect(socksPort, '127.0.0.1');
+    await new Promise((r) => s.once('connect', r));
+    const uid = await localPeerUid({ remotePort: s.localPort, localPort: socksPort });
+    expect(uid).toBe(process.getuid());
+    s.destroy();
+  });
+
   test('закритий порт — помилка з\'єднання передається клієнту', async () => {
     const tmp = net.createServer();
     const deadPort = await listen(tmp);

@@ -10,6 +10,7 @@
  */
 const net = require("net");
 const dns = require("dns");
+const fs = require("fs");
 
 const DNS_SERVERS = ["1.1.1.1", "8.8.8.8"];
 const HANDSHAKE_TIMEOUT_MS = 15000;
@@ -34,10 +35,25 @@ const reply = (sock, rep) => {
  * @param {() => string|null} o.getLocalAddress - поточний IP тунелю (null — тунель ще не готовий)
  * @param {(host: string, localAddress: string) => Promise<string>} [o.resolve] - резолв імені в IPv4
  * @param {(msg: string, meta?: object) => void} [o.onError]
+ * @param {number[]} [o.allowUids] - приймати з'єднання лише від процесів цих користувачів (Linux).
+ *   Сервер спільний: без цього будь-хто з його користувачів міг би ходити через наш VPN.
+ * @param {(sock: net.Socket) => Promise<number|null>} [o.peerUid] - визначення власника з'єднання
  * @returns {net.Server}
  */
-function createSocksServer({ getLocalAddress, resolve = resolveViaTunnel, onError = () => {} }) {
-  const server = net.createServer((client) => {
+function createSocksServer({ getLocalAddress, resolve = resolveViaTunnel, onError = () => {}, allowUids = null, peerUid = localPeerUid }) {
+  const server = net.createServer(async (client) => {
+    if (allowUids) {
+      client.pause();
+      client.on("error", () => {});
+      let uid = null;
+      try { uid = await peerUid(client); } catch { /* не вдалося визначити — нижче відмова */ }
+      if (uid === null || !allowUids.includes(uid)) {
+        onError("відхилено з'єднання іншого користувача", { uid });
+        return client.destroy();
+      }
+      if (client.destroyed) return;
+      client.resume();
+    }
     let buf = Buffer.alloc(0);
     let stage = "greeting";
     let upstream = null;
@@ -130,6 +146,25 @@ function createSocksServer({ getLocalAddress, resolve = resolveViaTunnel, onErro
   return server;
 }
 
+const hexPort = (n) => n.toString(16).toUpperCase().padStart(4, "0");
+
+/**
+ * Власник (uid) локального TCP-з'єднання до нашого сервера — з /proc/net/tcp (Linux).
+ * Рядок клієнтського сокета: local = 127.0.0.1:<порт клієнта>, rem = 127.0.0.1:<наш порт>, 8-ме поле — uid.
+ * @returns {Promise<number|null>} null — не Linux або сокет не знайдено
+ */
+async function localPeerUid(sock) {
+  if (process.platform !== "linux") return null;
+  const local = `0100007F:${hexPort(sock.remotePort)}`;
+  const rem = `0100007F:${hexPort(sock.localPort)}`;
+  const text = await fs.promises.readFile("/proc/net/tcp", "utf8");
+  for (const line of text.split("\n")) {
+    const f = line.trim().split(/\s+/);
+    if (f[1] === local && f[2] === rem) return Number(f[7]);
+  }
+  return null;
+}
+
 // Резолвери на кожен IP тунелю (IP може змінитися після перепідключення openvpn)
 const resolvers = new Map();
 
@@ -151,4 +186,4 @@ async function resolveViaTunnel(host, localAddress) {
   return address;
 }
 
-module.exports = { createSocksServer, resolveViaTunnel };
+module.exports = { createSocksServer, resolveViaTunnel, localPeerUid };
